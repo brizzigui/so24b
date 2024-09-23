@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "dispositivos.h": "c",
+        "err.h": "c",
+        "relogio.h": "c"
+    }
+}

@@ -15,6 +15,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 // constantes
 #define MEM_TAM 2000        // tamanho da memória principal
@@ -58,6 +59,8 @@ static void cria_hardware(hardware_t *hw)
   // lê relógio virtual, relógio real
   es_registra_dispositivo(hw->es, D_RELOGIO_INSTRUCOES, hw->relogio, 0, relogio_leitura, NULL);
   es_registra_dispositivo(hw->es, D_RELOGIO_REAL      , hw->relogio, 1, relogio_leitura, NULL);
+  es_registra_dispositivo(hw->es, D_RAND              , NULL, 0, rand_leitura, NULL);
+
 
   // cria a unidade de execução e inicializa com a memória e o controlador de E/S
   hw->cpu = cpu_cria(hw->mem, hw->es);
@@ -101,6 +104,7 @@ static void init_mem(mem_t *mem, char *nome_do_executavel)
 
 int main(int argc, char *argv[])
 {
+  srand(time(NULL));
   hardware_t hw;
   char *nome_do_programa = "ex1.maq";
   if (argc > 1) nome_do_programa = argv[1];
