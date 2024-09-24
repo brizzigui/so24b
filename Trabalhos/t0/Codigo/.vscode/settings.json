@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "stdbool.h": "c",
+        "terminal.h": "c",
+        "aleatorio.h": "c"
+    }
+}

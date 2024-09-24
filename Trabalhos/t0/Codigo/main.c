@@ -29,6 +29,7 @@ typedef struct {
   console_t *console;
   es_t *es;
   controle_t *controle;
+  aleatorio_t *aleatorio;
 } hardware_t;
 
 static void cria_hardware(hardware_t *hw)
@@ -39,6 +40,7 @@ static void cria_hardware(hardware_t *hw)
   // cria dispositivos de E/S
   hw->console = console_cria();
   hw->relogio = relogio_cria();
+  hw->aleatorio = aleatorio_cria();
 
   // cria o controlador de E/S e registra os dispositivos
   //   por exemplo, o dispositivo 8 do controlador de E/S (e da CPU) será o
@@ -60,7 +62,7 @@ static void cria_hardware(hardware_t *hw)
   // lê relógio virtual, relógio real
   es_registra_dispositivo(hw->es, D_RELOGIO_INSTRUCOES, hw->relogio, 0, relogio_leitura, NULL);
   es_registra_dispositivo(hw->es, D_RELOGIO_REAL      , hw->relogio, 1, relogio_leitura, NULL);
-  es_registra_dispositivo(hw->es, D_RAND              , NULL, 0, rand_leitura, NULL);
+  es_registra_dispositivo(hw->es, D_RAND              , hw->aleatorio, 0, rand_leitura, NULL);
 
 
   // cria a unidade de execução e inicializa com a memória e o controlador de E/S
@@ -105,7 +107,6 @@ static void init_mem(mem_t *mem, char *nome_do_executavel)
 
 int main(int argc, char *argv[])
 {
-  srand(time(NULL));
   hardware_t hw;
   char *nome_do_programa = "ex1.maq";
   if (argc > 1) nome_do_programa = argv[1];
