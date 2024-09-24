@@ -56,9 +56,3 @@ err_t relogio_leitura(void *disp, int id, int *pvalor)
   }
   return err;
 }
-
-err_t rand_leitura(void *disp, int id, int *pvalor)
-{
-  *pvalor = rand();
-  return 0;
-}

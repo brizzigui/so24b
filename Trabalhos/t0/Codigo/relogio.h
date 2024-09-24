@@ -33,6 +33,4 @@ int relogio_agora(relogio_t *self);
 // Devem seguir o protocolo f_leitura_t e f_escrita_t declarados em es.h
 err_t relogio_leitura(void *disp, int id, int *pvalor);
 
-err_t rand_leitura(void *disp, int id, int *pvalor);
-
 #endif // RELOGIO_H

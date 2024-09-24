@@ -7,11 +7,11 @@ CFLAGS = -Wall -Werror -g
 LDLIBS = -lcurses
 
 # arquivos objeto compilados (.o) que compõem o simulador (main) e o montador
-OBJS_MAIN = cpu.o es.o memoria.o relogio.o console.o terminal.o tela_curses.o \
+OBJS_MAIN = cpu.o es.o memoria.o relogio.o aleatorio.o console.o terminal.o tela_curses.o \
 		instrucao.o err.o programa.o controle.o main.o
 OBJS_MONTADOR = instrucao.o err.o montador.o
 OBJS = ${OBJS_MAIN} ${OBJS_MONTADOR}
-MAQS = ex1.maq ex2.maq ex3.maq ex4.maq ex5.maq ex6.maq
+MAQS = ex1.maq ex2.maq ex3.maq ex4.maq ex5.maq ex6.maq ./own/count.maq ./own/ex5_modified.maq ./own/print_rands.maq ./own/random.maq
 TARGETS = main montador ${MAQS}
 
 # arquivos que devem ser feitos, se não for especificado no comando do make

@@ -12,6 +12,7 @@
 #include "terminal.h"
 #include "es.h"
 #include "dispositivos.h"
+#include "aleatorio.h"
 
 #include <stdio.h>
 #include <stdlib.h>

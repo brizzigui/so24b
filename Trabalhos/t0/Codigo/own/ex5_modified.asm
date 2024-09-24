@@ -20,9 +20,9 @@ laco     chama lechute
          chama vechute
          desvz laco
          para
-str1     string 'Olá. Escolhi um número entre 1 e 100. Adivinha qual.       '
+str1     string 'Olá. Escolhi um número entre 0 e 100. Adivinha qual.       '
 str2     valor LIMPA
-         string 'Digite um número entre 1 e 100 '
+         string 'Digite um número entre 0 e 100 '
 
 ; lê um número do usuário, até que seja válido
 lechute  espaco 1
