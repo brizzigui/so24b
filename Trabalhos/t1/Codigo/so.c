@@ -9,9 +9,12 @@
 #include "irq.h"
 #include "programa.h"
 #include "instrucao.h"
+#include "proc.h"
 
 #include <stdlib.h>
 #include <stdbool.h>
+
+#define MAX_PROC 10
 
 // CONSTANTES E TIPOS {{{1
 // intervalo entre interrupções do relógio
@@ -23,6 +26,13 @@ struct so_t {
   es_t *es;
   console_t *console;
   bool erro_interno;
+
+  process_t **process_table;
+  process_t *current_process;
+
+  int process_counter;
+  int process_slots;
+
   // t1: tabela de processos, processo corrente, pendências, etc
 };
 
@@ -48,6 +58,12 @@ so_t *so_cria(cpu_t *cpu, mem_t *mem, es_t *es, console_t *console)
   self->es = es;
   self->console = console;
   self->erro_interno = false;
+
+  self->process_slots = MAX_PROC;
+  self->process_table = malloc(self->process_slots * sizeof(process_t *));
+  self->current_process = NULL;
+  self->process_counter = 1;
+
 
   // quando a CPU executar uma instrução CHAMAC, deve chamar a função
   //   so_trata_interrupcao, com primeiro argumento um ptr para o SO
@@ -130,6 +146,21 @@ static void so_salva_estado_da_cpu(so_t *self)
   //   processo corrente. os valores dos registradores foram colocados pela
   //   CPU na memória, nos endereços IRQ_END_*
   // se não houver processo corrente, não faz nada
+
+  if (self->current_process == NULL)
+  {
+    return;
+  }
+
+  int tmp_A, tmp_X, tmp_PC;
+  mem_le(self->mem, IRQ_END_A, &tmp_A);
+  mem_le(self->mem, IRQ_END_X, &tmp_X);
+  mem_le(self->mem, IRQ_END_PC, &tmp_PC);
+
+  proc_set_A(self->current_process, tmp_A);
+  proc_set_X(self->current_process, tmp_X);
+  proc_set_PC(self->current_process, tmp_PC);
+  
 }
 
 static void so_trata_pendencias(so_t *self)
@@ -143,10 +174,25 @@ static void so_trata_pendencias(so_t *self)
 
 static void so_escalona(so_t *self)
 {
-  // escolhe o próximo processo a executar, que passa a ser o processo
-  //   corrente; pode continuar sendo o mesmo de antes ou não
-  // t1: na primeira versão, escolhe um processo caso o processo corrente não possa continuar
-  //   executando. depois, implementar escalonador melhor
+  if(proc_get_state(self->current_process) == PROC_EXECUTANDO)
+  {
+    return;
+  }
+
+  else
+  {
+    for (int i = 0; i < self->process_counter; i++)
+    {
+      process_t *analyzed = self->process_table[i];
+      if (proc_get_state(analyzed) == PROC_PRONTO)
+      {
+        proc_set_state(analyzed, PROC_EXECUTANDO);
+        return;
+      }
+      
+    }
+    
+  }
 }
 
 static int so_despacha(so_t *self)
@@ -155,7 +201,41 @@ static int so_despacha(so_t *self)
   //   será recuperado pela CPU (em IRQ_END_*) e retorna 0, senão retorna 1
   // o valor retornado será o valor de retorno de CHAMAC
   if (self->erro_interno) return 1;
-  else return 0;
+
+  int a, x, pc;
+  a = proc_get_A(self->current_process);
+  x = proc_get_X(self->current_process);
+  pc = proc_get_PC(self->current_process);
+
+  mem_escreve(self->mem, IRQ_END_A, a);
+  mem_escreve(self->mem, IRQ_END_X, x);
+  mem_escreve(self->mem, IRQ_END_PC, pc);
+
+  return 0;
+}
+
+process_t *so_novo_proc(so_t *self, char* origin)
+{
+  int ender = so_carrega_programa(self, origin);
+  process_t *proc = proc_create(self->process_counter, ender);
+
+  if (self->process_counter == MAX_PROC)
+  {
+    self->process_slots *= 2;
+    self->process_table = realloc(self->process_table, sizeof(process_t *) * self->process_slots);
+
+    if(self->process_table == NULL)
+    {
+      console_printf("Erro crítico do SO\n");
+      exit(-1);
+    }
+
+  }
+  
+  self->process_table[self->process_counter] = proc;
+  self->process_counter++;
+
+  return proc;
 }
 
 // TRATAMENTO DE UMA IRQ {{{1
@@ -198,18 +278,21 @@ static void so_trata_irq_reset(so_t *self)
   //   registradores diretamente para a memória, de onde a CPU vai carregar
   //   para os seus registradores quando executar a instrução RETI
 
+  process_t *process = so_novo_proc(self, "init.maq");
+
   // coloca o programa init na memória
-  int ender = so_carrega_programa(self, "init.maq");
-  if (ender != 100) {
+  if (proc_get_PC(process) != 100) {
     console_printf("SO: problema na carga do programa inicial");
     self->erro_interno = true;
     return;
   }
 
   // altera o PC para o endereço de carga
-  mem_escreve(self->mem, IRQ_END_PC, ender);
+  // n sei pq comentei mas comentei*************************************
+  // mem_escreve(self->mem, IRQ_END_PC, ender);
   // passa o processador para modo usuário
   mem_escreve(self->mem, IRQ_END_modo, usuario);
+
 }
 
 // interrupção gerada quando a CPU identifica um erro
@@ -309,7 +392,7 @@ static void so_chamada_le(so_t *self)
   //     o caso
   // implementação lendo direto do terminal A
   //   T1: deveria usar dispositivo de entrada corrente do processo
-  for (;;) {
+  while (true) {
     int estado;
     if (es_le(self->es, D_TERM_A_TECLADO_OK, &estado) != ERR_OK) {
       console_printf("SO: problema no acesso ao estado do teclado");
@@ -334,7 +417,7 @@ static void so_chamada_le(so_t *self)
   // T1: se houvesse processo, deveria escrever no reg A do processo
   // T1: o acesso só deve ser feito nesse momento se for possível; se não, o processo
   //   é bloqueado, e o acesso só deve ser feito mais tarde (e o processo desbloqueado)
-  mem_escreve(self->mem, IRQ_END_A, dado);
+  proc_set_A(self->current_process, dado);
 }
 
 // implementação da chamada se sistema SO_ESCR
@@ -381,29 +464,54 @@ static void so_chamada_cria_proc(so_t *self)
   // quem chamou o sistema não vai mais ser executado, coitado!
   // T1: deveria criar um novo processo
 
+
   // em X está o endereço onde está o nome do arquivo
   int ender_proc;
+  char nome[100];
+
   // t1: deveria ler o X do descritor do processo criador
-  if (mem_le(self->mem, IRQ_END_X, &ender_proc) == ERR_OK) {
-    char nome[100];
-    if (copia_str_da_mem(100, nome, self->mem, ender_proc)) {
-      int ender_carga = so_carrega_programa(self, nome);
+  if (mem_le(self->mem, IRQ_END_X, &ender_proc) == ERR_OK) 
+  {
+    if (copia_str_da_mem(100, nome, self->mem, ender_proc)) 
+    {
+      process_t *process = so_novo_proc(self, nome);
+
+      int ender_carga = proc_get_PC(process);
       if (ender_carga > 0) {
         // t1: deveria escrever no PC do descritor do processo criado
-        mem_escreve(self->mem, IRQ_END_PC, ender_carga);
+        proc_set_A(self->current_process, proc_get_ID(process));
         return;
-      } // else?
+      }
     }
   }
   // deveria escrever -1 (se erro) ou o PID do processo criado (se OK) no reg A
   //   do processo que pediu a criação
-  mem_escreve(self->mem, IRQ_END_A, -1);
+  proc_set_A(self->current_process, -1);
+
 }
 
 // implementação da chamada se sistema SO_MATA_PROC
 // mata o processo com pid X (ou o processo corrente se X é 0)
 static void so_chamada_mata_proc(so_t *self)
 {
+  if(self->current_process == NULL)
+  {
+    return;
+  }
+
+  int read_x = proc_get_X(self->current_process);
+
+  if (read_x == 0)
+  {
+    proc_set_state(self->current_process, PROC_MORTO);
+  }
+
+  else
+  {
+    proc_set_state(self->process_table[read_x], PROC_MORTO);
+  }
+  
+
   // T1: deveria matar um processo
   // ainda sem suporte a processos, retorna erro -1
   console_printf("SO: SO_MATA_PROC não implementada");
