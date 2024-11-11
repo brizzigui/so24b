@@ -174,18 +174,22 @@ static void so_trata_pendencias(so_t *self)
 
 static void so_escalona(so_t *self)
 {
-  if(proc_get_state(self->current_process) == PROC_EXECUTANDO)
+  if(self->current_process != NULL)
   {
-    return;
+    if(proc_get_state(self->current_process) == PROC_EXECUTANDO)
+    {
+      return;
+    }
   }
 
   else
   {
-    for (int i = 0; i < self->process_counter; i++)
+    for (int i = 1; i < self->process_counter; i++)
     {
       process_t *analyzed = self->process_table[i];
       if (proc_get_state(analyzed) == PROC_PRONTO)
       {
+        self->current_process = analyzed;
         proc_set_state(analyzed, PROC_EXECUTANDO);
         return;
       }
@@ -200,7 +204,7 @@ static int so_despacha(so_t *self)
   // t1: se houver processo corrente, coloca o estado desse processo onde ele
   //   será recuperado pela CPU (em IRQ_END_*) e retorna 0, senão retorna 1
   // o valor retornado será o valor de retorno de CHAMAC
-  if (self->erro_interno) return 1;
+  if (self->erro_interno || self->current_process == NULL) return 1;
 
   int a, x, pc;
   a = proc_get_A(self->current_process);
@@ -234,6 +238,7 @@ process_t *so_novo_proc(so_t *self, char* origin)
   
   self->process_table[self->process_counter] = proc;
   self->process_counter++;
+
 
   return proc;
 }
@@ -279,6 +284,7 @@ static void so_trata_irq_reset(so_t *self)
   //   para os seus registradores quando executar a instrução RETI
 
   process_t *process = so_novo_proc(self, "init.maq");
+  self->current_process = process;
 
   // coloca o programa init na memória
   if (proc_get_PC(process) != 100) {
@@ -286,6 +292,7 @@ static void so_trata_irq_reset(so_t *self)
     self->erro_interno = true;
     return;
   }
+
 
   // altera o PC para o endereço de carga
   // n sei pq comentei mas comentei*************************************
@@ -379,6 +386,11 @@ static void so_trata_irq_chamada_sistema(so_t *self)
   }
 }
 
+int device_calc(int device, int type)
+{
+  return device + type;
+}
+
 // implementação da chamada se sistema SO_LE
 // faz a leitura de um dado da entrada corrente do processo, coloca o dado no reg A
 static void so_chamada_le(so_t *self)
@@ -392,9 +404,11 @@ static void so_chamada_le(so_t *self)
   //     o caso
   // implementação lendo direto do terminal A
   //   T1: deveria usar dispositivo de entrada corrente do processo
+  int base_device = proc_get_device(self->current_process);
+
   while (true) {
     int estado;
-    if (es_le(self->es, D_TERM_A_TECLADO_OK, &estado) != ERR_OK) {
+    if (es_le(self->es, device_calc(base_device, TECLADO_OK), &estado) != ERR_OK) {
       console_printf("SO: problema no acesso ao estado do teclado");
       self->erro_interno = true;
       return;
@@ -407,7 +421,7 @@ static void so_chamada_le(so_t *self)
     console_tictac(self->console);
   }
   int dado;
-  if (es_le(self->es, D_TERM_A_TECLADO, &dado) != ERR_OK) {
+  if (es_le(self->es, device_calc(base_device, TECLADO), &dado) != ERR_OK) {
     console_printf("SO: problema no acesso ao teclado");
     self->erro_interno = true;
     return;
@@ -428,9 +442,11 @@ static void so_chamada_escr(so_t *self)
   //   T1: deveria bloquear o processo se dispositivo ocupado
   // implementação escrevendo direto do terminal A
   //   T1: deveria usar o dispositivo de saída corrente do processo
-  for (;;) {
+  int base_device = proc_get_device(self->current_process);
+
+  while (true) {
     int estado;
-    if (es_le(self->es, D_TERM_A_TELA_OK, &estado) != ERR_OK) {
+    if (es_le(self->es, device_calc(base_device, TELA_OK), &estado) != ERR_OK) {
       console_printf("SO: problema no acesso ao estado da tela");
       self->erro_interno = true;
       return;
@@ -448,7 +464,7 @@ static void so_chamada_escr(so_t *self)
   // T1: caso o processo tenha sido bloqueado, esse acesso deve ser realizado em outra execução
   //   do SO, quando ele verificar que esse acesso já pode ser feito.
   mem_le(self->mem, IRQ_END_X, &dado);
-  if (es_escreve(self->es, D_TERM_A_TELA, dado) != ERR_OK) {
+  if (es_escreve(self->es, device_calc(base_device, TELA), dado) != ERR_OK) {
     console_printf("SO: problema no acesso à tela");
     self->erro_interno = true;
     return;
@@ -500,6 +516,7 @@ static void so_chamada_mata_proc(so_t *self)
   }
 
   int read_x = proc_get_X(self->current_process);
+  console_printf("%d", read_x);
 
   if (read_x == 0)
   {
@@ -511,6 +528,7 @@ static void so_chamada_mata_proc(so_t *self)
     proc_set_state(self->process_table[read_x], PROC_MORTO);
   }
   
+  self->current_process = NULL;
 
   // T1: deveria matar um processo
   // ainda sem suporte a processos, retorna erro -1
