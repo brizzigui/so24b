@@ -108,6 +108,7 @@ static void so_trata_pendencias(so_t *self);
 static void so_escalona(so_t *self);
 static int so_despacha(so_t *self);
 
+
 // função a ser chamada pela CPU quando executa a instrução CHAMAC, no tratador de
 //   interrupção em assembly
 // essa é a única forma de entrada no SO depois da inicialização
@@ -163,6 +164,90 @@ static void so_salva_estado_da_cpu(so_t *self)
   
 }
 
+int device_calc(int device, int type);
+
+static void so_bloqueia_proc(process_t* proc, int block_type, int block_info)
+{
+  console_printf("BLOQUEEI UM PROCESSO, SUA ID ERA %d com causa %d", proc_get_ID(proc), block_type);
+  proc_set_state(proc, PROC_BLOQUEADO);
+  proc_set_block_type(proc, block_type);
+  proc_set_block_info(proc, block_info);
+}
+
+static void so_desbloqueia_proc(process_t* proc)
+{
+  console_printf("DESBLOQUEEI UM PROCESSO, SUA ID ERA %d", proc_get_ID(proc));
+  proc_set_state(proc, PROC_PRONTO);
+  proc_set_block_type(proc, AGUARDA_NADA);
+  proc_set_block_info(proc, NULL_ID);
+}
+
+static void so_trata_pendencia_leitura(so_t *self, process_t* proc)
+{
+  int base_device = proc_get_device(proc);
+
+  int estado;
+  if (es_le(self->es, device_calc(base_device, TECLADO_OK), &estado) != ERR_OK) {
+    console_printf("SO: problema no acesso ao estado do teclado");
+    self->erro_interno = true;
+    return;
+  }
+
+  if (estado == 0)
+  {
+    return;
+  }
+
+  int dado;
+  if (es_le(self->es, device_calc(base_device, TECLADO), &dado) != ERR_OK) {
+    console_printf("SO: problema no acesso ao teclado");
+    self->erro_interno = true;
+    return;
+  }
+  
+  proc_set_A(proc, dado);
+  so_desbloqueia_proc(proc);
+}
+
+static void so_trata_pendencia_escrita(so_t *self, process_t* proc)
+{
+  int base_device = proc_get_device(proc);
+
+  int estado;
+  if (es_le(self->es, device_calc(base_device, TELA_OK), &estado) != ERR_OK) {
+    console_printf("SO: problema no acesso ao estado da tela");
+    self->erro_interno = true;
+    return;
+  }
+
+  if (estado == 0)
+  {
+    return;
+  }
+
+
+  int dado = proc_get_X(proc);
+  console_printf("Imprimi %c", dado);
+  if (es_escreve(self->es, device_calc(base_device, TELA), dado) != ERR_OK) {
+    console_printf("SO: problema no acesso à tela");
+    self->erro_interno = true;
+    return;
+  }
+  proc_set_A(proc, 0);
+  so_desbloqueia_proc(proc);
+}
+
+static void so_trata_pendencia_espera(so_t *self, process_t* proc)
+{
+  int awaiting_proc = proc_get_block_info(proc);
+  exec_state_t state = proc_get_state(self->process_table[awaiting_proc]);
+
+  if(state == PROC_MORTO)
+  {
+    so_desbloqueia_proc(proc);
+  }
+}
+
 static void so_trata_pendencias(so_t *self)
 {
   // t1: realiza ações que não são diretamente ligadas com a interrupção que
@@ -170,24 +255,51 @@ static void so_trata_pendencias(so_t *self)
   // - E/S pendente
   // - desbloqueio de processos
   // - contabilidades
+
+  for (int i = 1; i < self->process_counter; i++)
+  {
+    process_t *analyzed = self->process_table[i];
+    if (analyzed != NULL && proc_get_state(analyzed) == PROC_BLOQUEADO)
+    {
+      int block_type = proc_get_block_type(analyzed);
+
+      switch (block_type)
+      {
+        case AGUARDA_ENTRADA:
+          so_trata_pendencia_leitura(self, analyzed);
+          break;
+        
+        case AGUARDA_SAIDA:
+          so_trata_pendencia_escrita(self, analyzed);
+          break;
+
+        case AGUARDA_PROC:
+          so_trata_pendencia_espera(self, analyzed);
+          break;
+        
+        default:
+          break;
+      }
+    }
+  }
+  
+
 }
 
 static void so_escalona(so_t *self)
 {
-  if(self->current_process != NULL)
+  if(self->current_process != NULL && proc_get_state(self->current_process) == PROC_EXECUTANDO)
   {
-    if(proc_get_state(self->current_process) == PROC_EXECUTANDO)
-    {
-      return;
-    }
+    return;
   }
 
   else
   {
+    self->current_process = NULL;
     for (int i = 1; i < self->process_counter; i++)
     {
       process_t *analyzed = self->process_table[i];
-      if (proc_get_state(analyzed) == PROC_PRONTO)
+      if (analyzed != NULL && proc_get_state(analyzed) == PROC_PRONTO)
       {
         self->current_process = analyzed;
         proc_set_state(analyzed, PROC_EXECUTANDO);
@@ -406,20 +518,19 @@ static void so_chamada_le(so_t *self)
   //   T1: deveria usar dispositivo de entrada corrente do processo
   int base_device = proc_get_device(self->current_process);
 
-  while (true) {
-    int estado;
-    if (es_le(self->es, device_calc(base_device, TECLADO_OK), &estado) != ERR_OK) {
-      console_printf("SO: problema no acesso ao estado do teclado");
-      self->erro_interno = true;
-      return;
-    }
-    if (estado != 0) break;
-    // como não está saindo do SO, a unidade de controle não está executando seu laço.
-    // esta gambiarra faz pelo menos a console ser atualizada
-    // T1: com a implementação de bloqueio de processo, esta gambiarra não
-    //   deve mais existir.
-    console_tictac(self->console);
+  int estado;
+  if (es_le(self->es, device_calc(base_device, TECLADO_OK), &estado) != ERR_OK) {
+    console_printf("SO: problema no acesso ao estado do teclado");
+    self->erro_interno = true;
+    return;
   }
+
+  if (estado == 0)
+  {
+    so_bloqueia_proc(self->current_process, AGUARDA_ENTRADA, proc_get_device(self->current_process));
+    return;
+  }
+
   int dado;
   if (es_le(self->es, device_calc(base_device, TECLADO), &dado) != ERR_OK) {
     console_printf("SO: problema no acesso ao teclado");
@@ -444,32 +555,30 @@ static void so_chamada_escr(so_t *self)
   //   T1: deveria usar o dispositivo de saída corrente do processo
   int base_device = proc_get_device(self->current_process);
 
-  while (true) {
-    int estado;
-    if (es_le(self->es, device_calc(base_device, TELA_OK), &estado) != ERR_OK) {
-      console_printf("SO: problema no acesso ao estado da tela");
-      self->erro_interno = true;
-      return;
-    }
-    if (estado != 0) break;
-    // como não está saindo do SO, a unidade de controle não está executando seu laço.
-    // esta gambiarra faz pelo menos a console ser atualizada
-    // T1: não deve mais existir quando houver suporte a processos, porque o SO não poderá
-    //   executar por muito tempo, permitindo a execução do laço da unidade de controle
-    console_tictac(self->console);
+  int estado;
+  if (es_le(self->es, device_calc(base_device, TELA_OK), &estado) != ERR_OK) {
+    console_printf("SO: problema no acesso ao estado da tela");
+    self->erro_interno = true;
+    return;
   }
-  int dado;
+
+  if (estado == 0)
+  {
+    so_bloqueia_proc(self->current_process, AGUARDA_SAIDA, proc_get_device(self->current_process));
+    return;
+  }
+
   // está lendo o valor de X e escrevendo o de A direto onde o processador colocou/vai pegar
   // T1: deveria usar os registradores do processo que está realizando a E/S
   // T1: caso o processo tenha sido bloqueado, esse acesso deve ser realizado em outra execução
   //   do SO, quando ele verificar que esse acesso já pode ser feito.
-  mem_le(self->mem, IRQ_END_X, &dado);
+  int dado = proc_get_X(self->current_process);
   if (es_escreve(self->es, device_calc(base_device, TELA), dado) != ERR_OK) {
     console_printf("SO: problema no acesso à tela");
     self->erro_interno = true;
     return;
   }
-  mem_escreve(self->mem, IRQ_END_A, 0);
+  proc_set_A(self->current_process, 0);
 }
 
 // implementação da chamada se sistema SO_CRIA_PROC
@@ -542,8 +651,8 @@ static void so_chamada_espera_proc(so_t *self)
 {
   // T1: deveria bloquear o processo se for o caso (e desbloquear na morte do esperado)
   // ainda sem suporte a processos, retorna erro -1
-  console_printf("SO: SO_ESPERA_PROC não implementada");
-  mem_escreve(self->mem, IRQ_END_A, -1);
+  int awaits_who = proc_get_X(self->current_process);
+  so_bloqueia_proc(self->current_process, AGUARDA_PROC, awaits_who);
 }
 
 // CARGA DE PROGRAMA {{{1

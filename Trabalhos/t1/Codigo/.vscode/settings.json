@@ -3,6 +3,7 @@
         "so.h": "c",
         "stdbool.h": "c",
         "stdlib.h": "c",
-        "proc.h": "c"
+        "proc.h": "c",
+        "instrucao.h": "c"
     }
 }

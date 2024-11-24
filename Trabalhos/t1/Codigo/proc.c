@@ -19,6 +19,9 @@ struct process_t
     int PC;
 
     int device;
+
+    int block_type;
+    int block_info;
 };
 
 
@@ -29,6 +32,9 @@ process_t *proc_create(int id, int PC)
     process->PC = PC;
     process->exec_state = PROC_PRONTO;
     process->device = (id%4)*4;
+
+    process->block_type = AGUARDA_NADA;
+    process->block_info = NULL_ID;
 
     return process;
 }
@@ -63,6 +69,18 @@ int proc_get_device(process_t* proc)
     return proc->device;
 }
 
+int proc_get_block_type(process_t *proc)
+{
+    return proc->block_type;
+}
+
+int proc_get_block_info(process_t *proc)
+{
+    return proc->block_info;
+}
+
+/*---------------------------------------------------------------*/
+
 void proc_set_ID(process_t *proc, int id)
 {
     proc->id = id;
@@ -93,4 +111,13 @@ void proc_set_device(process_t *proc, int device)
     proc->device = device;
 }
 
+void proc_set_block_type(process_t *proc, int block_type)
+{
+    proc->block_type = block_type;
+}
+
+void proc_set_block_info(process_t *proc, int block_info)
+{
+    proc->block_info = block_info;
+}
 

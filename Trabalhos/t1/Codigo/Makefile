@@ -6,7 +6,7 @@ SHELL:=/bin/bash
 # opções de compilação
 CC = gcc
 CFLAGS = -Wall -Werror -g
-LDLIBS = -lcurses
+LDLIBS = -lncursesw
 
 # arquivos objeto compilados (.o) que compõem o simulador (main) e o montador
 OBJS_MAIN = cpu.o es.o memoria.o relogio.o console.o terminal.o tela_curses.o \
