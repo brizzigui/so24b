@@ -22,6 +22,8 @@ struct process_t
 
     int block_type;
     int block_info;
+
+    double priority;
 };
 
 
@@ -35,6 +37,8 @@ process_t *proc_create(int id, int PC)
 
     process->block_type = AGUARDA_NADA;
     process->block_info = NULL_ID;
+
+    process->priority = 0.5;
 
     return process;
 }
@@ -79,6 +83,11 @@ int proc_get_block_info(process_t *proc)
     return proc->block_info;
 }
 
+double proc_get_priority(process_t *proc)
+{
+    return proc->priority;
+}
+
 /*---------------------------------------------------------------*/
 
 void proc_set_ID(process_t *proc, int id)
@@ -121,3 +130,12 @@ void proc_set_block_info(process_t *proc, int block_info)
     proc->block_info = block_info;
 }
 
+void proc_set_priority(process_t *proc, int priority)
+{
+    proc->priority = priority;
+}
+
+void proc_calc_priority(process_t *proc, int remaining_time, int default_time)
+{
+    proc->priority = (proc->priority + (default_time-remaining_time)/default_time)/2;
+}

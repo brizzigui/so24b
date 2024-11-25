@@ -26,6 +26,7 @@ exec_state_t proc_get_state(process_t *proc);
 int proc_get_device(process_t* proc);
 int proc_get_block_type(process_t *proc);
 int proc_get_block_info(process_t *proc);
+double proc_get_priority(process_t *proc);
 
 
 void proc_set_ID(process_t *proc, int id);
@@ -36,6 +37,8 @@ void proc_set_state(process_t *proc, exec_state_t state);
 void proc_set_device(process_t *proc, int device);
 void proc_set_block_type(process_t *proc, int block_type);
 void proc_set_block_info(process_t *proc, int block_info);
+void proc_set_priority(process_t *proc, int priority);
 
+void proc_calc_priority(process_t *proc, int remaining_time, int default_time);
 
 #endif

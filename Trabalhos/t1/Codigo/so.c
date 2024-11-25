@@ -10,11 +10,20 @@
 #include "programa.h"
 #include "instrucao.h"
 #include "proc.h"
+#include "list.h"
 
 #include <stdlib.h>
 #include <stdbool.h>
 
-#define MAX_PROC 10
+#define MAX_PROC 16
+#define DEFAULT_QUANTUM 10
+
+#define SCHEDULER_TYPE 2 // escolha o tipo de escalonador
+
+#define SCHEDULER_TYPE0 0
+#define SCHEDULER_TYPE1 1
+#define SCHEDULER_TYPE2 2
+
 
 // CONSTANTES E TIPOS {{{1
 // intervalo entre interrupções do relógio
@@ -32,6 +41,9 @@ struct so_t {
 
   int process_counter;
   int process_slots;
+
+  list *queue;
+  int quantum;
 
   // t1: tabela de processos, processo corrente, pendências, etc
 };
@@ -64,6 +76,8 @@ so_t *so_cria(cpu_t *cpu, mem_t *mem, es_t *es, console_t *console)
   self->current_process = NULL;
   self->process_counter = 1;
 
+  self->queue = list_create();  
+  self->quantum = DEFAULT_QUANTUM;
 
   // quando a CPU executar uma instrução CHAMAC, deve chamar a função
   //   so_trata_interrupcao, com primeiro argumento um ptr para o SO
@@ -166,20 +180,30 @@ static void so_salva_estado_da_cpu(so_t *self)
 
 int device_calc(int device, int type);
 
-static void so_bloqueia_proc(process_t* proc, int block_type, int block_info)
+static void so_bloqueia_proc(so_t *self, process_t* proc, int block_type, int block_info)
 {
   console_printf("BLOQUEEI UM PROCESSO, SUA ID ERA %d com causa %d", proc_get_ID(proc), block_type);
   proc_set_state(proc, PROC_BLOQUEADO);
   proc_set_block_type(proc, block_type);
   proc_set_block_info(proc, block_info);
+
+  void *v;
+  self->queue = list_pop(self->queue, &v);
+
+  if (self->current_process != NULL)
+  {
+    proc_calc_priority(self->current_process, self->quantum, DEFAULT_QUANTUM);
+  }
 }
 
-static void so_desbloqueia_proc(process_t* proc)
+static void so_desbloqueia_proc(so_t *self, process_t* proc)
 {
   console_printf("DESBLOQUEEI UM PROCESSO, SUA ID ERA %d", proc_get_ID(proc));
   proc_set_state(proc, PROC_PRONTO);
   proc_set_block_type(proc, AGUARDA_NADA);
   proc_set_block_info(proc, NULL_ID);
+
+  self->queue = list_append(self->queue, proc);
 }
 
 static void so_trata_pendencia_leitura(so_t *self, process_t* proc)
@@ -206,7 +230,7 @@ static void so_trata_pendencia_leitura(so_t *self, process_t* proc)
   }
   
   proc_set_A(proc, dado);
-  so_desbloqueia_proc(proc);
+  so_desbloqueia_proc(self, proc);
 }
 
 static void so_trata_pendencia_escrita(so_t *self, process_t* proc)
@@ -234,7 +258,7 @@ static void so_trata_pendencia_escrita(so_t *self, process_t* proc)
     return;
   }
   proc_set_A(proc, 0);
-  so_desbloqueia_proc(proc);
+  so_desbloqueia_proc(self, proc);
 }
 
 static void so_trata_pendencia_espera(so_t *self, process_t* proc)
@@ -244,7 +268,7 @@ static void so_trata_pendencia_espera(so_t *self, process_t* proc)
 
   if(state == PROC_MORTO)
   {
-    so_desbloqueia_proc(proc);
+    so_desbloqueia_proc(self, proc);
   }
 }
 
@@ -286,7 +310,7 @@ static void so_trata_pendencias(so_t *self)
 
 }
 
-static void so_escalona(so_t *self)
+static void scheduler_dumb_type0(so_t *self)
 {
   if(self->current_process != NULL && proc_get_state(self->current_process) == PROC_EXECUTANDO)
   {
@@ -309,6 +333,89 @@ static void so_escalona(so_t *self)
     }
     
   }
+}
+
+static void round_robin_type1(so_t *self)
+{
+  if(self->quantum == 0)
+  {
+    void *timed_out;
+
+    self->queue = list_pop(self->queue, &timed_out);
+    self->queue = list_append(self->queue, timed_out);
+  }
+
+  process_t *chosen_process = list_get(self->queue, 0);
+
+  if(chosen_process == self->current_process)
+  {
+    self->quantum--;
+    self->current_process = chosen_process;
+    return;
+  }
+
+  else
+  {
+    self->quantum = DEFAULT_QUANTUM;
+    self->current_process = chosen_process;
+  }
+
+}
+
+static void round_robin_type2(so_t *self)
+{
+  if(self->quantum == 0)
+  {
+    self->quantum = DEFAULT_QUANTUM;
+    if (self->current_process != NULL)
+    {
+      proc_calc_priority(self->current_process, self->quantum, DEFAULT_QUANTUM);
+    }
+  }
+
+  float max_priority = 0.0;
+  process_t *chosen_process = NULL;
+
+  for (int i = 1; i < self->process_counter; i++)
+  {
+    process_t *analyzed = self->process_table[i];
+    if (analyzed != NULL && proc_get_state(analyzed) == PROC_PRONTO)
+    {
+      double cur_priority = proc_get_priority(analyzed);
+      if (cur_priority > max_priority)
+      {
+        max_priority = cur_priority;
+        chosen_process = analyzed;
+      }
+    }
+  }
+
+
+  if (self->current_process == chosen_process)
+  {
+    self->quantum--;
+  }
+  
+  self->current_process = chosen_process; 
+}
+
+static void so_escalona(so_t *self)
+{
+  switch (SCHEDULER_TYPE)
+  {
+    case SCHEDULER_TYPE0:
+      scheduler_dumb_type0(self);
+      break;
+
+    case SCHEDULER_TYPE1:
+      round_robin_type1(self);
+      break;
+
+    case SCHEDULER_TYPE2:
+      round_robin_type2(self);
+      break;
+  }
+  
 }
 
 static int so_despacha(so_t *self)
@@ -351,6 +458,7 @@ process_t *so_novo_proc(so_t *self, char* origin)
   self->process_table[self->process_counter] = proc;
   self->process_counter++;
 
+  self->queue = list_append(self->queue, proc);
 
   return proc;
 }
@@ -527,7 +635,7 @@ static void so_chamada_le(so_t *self)
 
   if (estado == 0)
   {
-    so_bloqueia_proc(self->current_process, AGUARDA_ENTRADA, proc_get_device(self->current_process));
+    so_bloqueia_proc(self, self->current_process, AGUARDA_ENTRADA, proc_get_device(self->current_process));
     return;
   }
 
@@ -564,7 +672,7 @@ static void so_chamada_escr(so_t *self)
 
   if (estado == 0)
   {
-    so_bloqueia_proc(self->current_process, AGUARDA_SAIDA, proc_get_device(self->current_process));
+    so_bloqueia_proc(self, self->current_process, AGUARDA_SAIDA, proc_get_device(self->current_process));
     return;
   }
 
@@ -639,10 +747,10 @@ static void so_chamada_mata_proc(so_t *self)
   
   self->current_process = NULL;
 
+  void *v;
+  self->queue = list_pop(self->queue, &v);
+
   // T1: deveria matar um processo
-  // ainda sem suporte a processos, retorna erro -1
-  console_printf("SO: SO_MATA_PROC não implementada");
-  mem_escreve(self->mem, IRQ_END_A, -1);
 }
 
 // implementação da chamada se sistema SO_ESPERA_PROC
@@ -652,7 +760,7 @@ static void so_chamada_espera_proc(so_t *self)
   // T1: deveria bloquear o processo se for o caso (e desbloquear na morte do esperado)
   // ainda sem suporte a processos, retorna erro -1
   int awaits_who = proc_get_X(self->current_process);
-  so_bloqueia_proc(self->current_process, AGUARDA_PROC, awaits_who);
+  so_bloqueia_proc(self, self->current_process, AGUARDA_PROC, awaits_who);
 }
 
 // CARGA DE PROGRAMA {{{1

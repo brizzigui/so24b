@@ -4,6 +4,7 @@
         "stdbool.h": "c",
         "stdlib.h": "c",
         "proc.h": "c",
-        "instrucao.h": "c"
+        "instrucao.h": "c",
+        "stdio.h": "c"
     }
 }
