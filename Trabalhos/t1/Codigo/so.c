@@ -19,7 +19,7 @@
 #define MAX_PROC 16
 #define DEFAULT_QUANTUM 10
 
-#define SCHEDULER_TYPE 2 // escolha o tipo de escalonador
+#define SCHEDULER_TYPE 0 // escolha o tipo de escalonador
 
 #define SCHEDULER_TYPE0 0
 #define SCHEDULER_TYPE1 1
@@ -272,7 +272,7 @@ int device_calc(int device, int type);
 
 static void so_bloqueia_proc(so_t *self, process_t* proc, int block_type, int block_info)
 {
-  console_printf("SO: bloqueei um processo, sua id era %d com causa %d", proc_get_ID(proc), block_type);
+  // console_printf("SO: bloqueei um processo, sua id era %d com causa %d", proc_get_ID(proc), block_type);
   proc_set_state(proc, PROC_BLOQUEADO);
   proc_set_block_type(proc, block_type);
   proc_set_block_info(proc, block_info);
@@ -288,7 +288,7 @@ static void so_bloqueia_proc(so_t *self, process_t* proc, int block_type, int bl
 
 static void so_desbloqueia_proc(so_t *self, process_t* proc)
 {
-  console_printf("SO: desbloqueei um processo, sua id era %d", proc_get_ID(proc));
+  // console_printf("SO: desbloqueei um processo, sua id era %d", proc_get_ID(proc));
   proc_set_state(proc, PROC_PRONTO);
   proc_set_block_type(proc, AGUARDA_NADA);
   proc_set_block_info(proc, NULL_ID);
@@ -731,7 +731,7 @@ static void so_trata_irq_chamada_sistema(so_t *self)
     self->erro_interno = true;
     return;
   }
-  console_printf("SO: chamada de sistema %d", id_chamada);
+  //console_printf("SO: chamada de sistema %d", id_chamada);
   switch (id_chamada) {
     case SO_LE:
       so_chamada_le(self);
@@ -882,7 +882,6 @@ static void so_chamada_mata_proc(so_t *self)
   }
 
   int read_x = proc_get_X(self->current_process);
-  console_printf("%d", read_x);
 
   if (read_x == 0)
   {
@@ -992,10 +991,17 @@ void so_show_metrics(so_t *self)
 {
   so_tally(self);
 
+  console_printf("\n");
+  console_printf("\n");
+  console_printf("\n");
   console_printf("##################################################");
   console_printf("#####     Métricas do Sistema Operacional    #####");
   console_printf("##################################################");
-
+  console_printf("\n");
+  console_printf("##########       Configuração do SO     ##########");
+  console_printf("-> Intervalo interrupção: %d instruções", INTERVALO_INTERRUPCAO);
+  console_printf("-> Tempo de quantum:      %d interrupções", DEFAULT_QUANTUM);
+  console_printf("-> Escalonador usado:     tipo %d", SCHEDULER_TYPE);
   console_printf("\n");
   console_printf("##########        Métricas Gerais       ##########");
   console_printf("-> Número de processos criados: %d processos", self->metrics.total_processes);
@@ -1003,19 +1009,21 @@ void so_show_metrics(so_t *self)
   console_printf("-> Tempo total de ócio:         %d instruções", self->metrics.total_halted_time);
   console_printf("\n");
   console_printf("##########         Interrupções         ##########");
-  console_printf("-> Tipo IRQ_RESET:   %d interrupções", self->metrics.interrupts[IRQ_RESET]);
-  console_printf("-> Tipo IRQ_ERR_CPU: %d interrupções", self->metrics.interrupts[IRQ_ERR_CPU]);
-  console_printf("-> Tipo IRQ_SISTEMA: %d interrupções", self->metrics.interrupts[IRQ_SISTEMA]);
-  console_printf("-> Tipo IRQ_RELOGIO: %d interrupções", self->metrics.interrupts[IRQ_RELOGIO]);
-  console_printf("-> Tipo IRQ_TECLADO: %d interrupções", self->metrics.interrupts[IRQ_TECLADO]);
-  console_printf("-> Tipo IRQ_TELA:    %d interrupções", self->metrics.interrupts[IRQ_TELA]);
+  console_printf("-> Tipo IRQ_RESET:     %d interrupções", self->metrics.interrupts[IRQ_RESET]);
+  console_printf("-> Tipo IRQ_ERR_CPU:   %d interrupções", self->metrics.interrupts[IRQ_ERR_CPU]);
+  console_printf("-> Tipo IRQ_SISTEMA:   %d interrupções", self->metrics.interrupts[IRQ_SISTEMA]);
+  console_printf("-> Tipo IRQ_RELOGIO:   %d interrupções", self->metrics.interrupts[IRQ_RELOGIO]);
+  console_printf("-> Tipo IRQ_TECLADO:   %d interrupções", self->metrics.interrupts[IRQ_TECLADO]);
+  console_printf("-> Tipo IRQ_TELA:      %d interrupções", self->metrics.interrupts[IRQ_TELA]);
   
   console_printf("\n");
   console_printf("##########           Processos          ##########");
   for (int i = 1; i < self->process_counter; i++)
   {
     process_t *proc = self->process_table[i];
+    proc_internal_tally(proc);
     proc_metrics_t *proc_metrics = proc_get_metrics_ptr(proc);
+
     console_printf("--------------------  ID: #%02d  --------------------", proc_get_ID(proc));
     console_printf("-> Tempo de retorno:        %d instruções", proc_metrics->existence_time);
     console_printf("-> Número de preempções:    %d preempções", proc_metrics->preemptions);
@@ -1034,8 +1042,7 @@ void so_show_metrics(so_t *self)
     console_printf("| %10d | %10d | %10d |", proc_metrics->ready_time, proc_metrics->blocked_time, proc_metrics->executing_time);
     console_printf("----------------------------------------");
     
-
-    proc_internal_tally(proc);
+    console_printf("\n");
   }
 
     console_printf("--------------------------------------------------");
@@ -1054,7 +1061,6 @@ void so_show_metrics(so_t *self)
     console_printf("---------------------------------by-brizzi--------");
 
 }
-
 
 
 // vim: foldmethod=marker
