@@ -104,6 +104,8 @@ int main()
   // executa o laço principal do controlador
   controle_laco(hw.controle);
 
+  so_show_metrics(so);
+
   // destroi tudo
   so_destroi(so);
   destroi_hardware(&hw);

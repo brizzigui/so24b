@@ -7,6 +7,7 @@
 #define SO_H
 
 typedef struct so_t so_t;
+typedef struct sys_metrics_t sys_metrics_t;
 
 #include "memoria.h"
 #include "cpu.h"
@@ -15,6 +16,7 @@ typedef struct so_t so_t;
 
 so_t *so_cria(cpu_t *cpu, mem_t *mem, es_t *es, console_t *console);
 void so_destroi(so_t *self);
+void so_show_metrics(so_t *self);
 
 // Chamadas de sistema
 // Uma chamada de sistema é realizada colocando a identificação da

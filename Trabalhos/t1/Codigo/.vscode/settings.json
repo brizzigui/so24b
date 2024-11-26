@@ -5,6 +5,7 @@
         "stdlib.h": "c",
         "proc.h": "c",
         "instrucao.h": "c",
-        "stdio.h": "c"
+        "stdio.h": "c",
+        "metrics.h": "c"
     }
 }

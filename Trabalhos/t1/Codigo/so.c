@@ -12,6 +12,7 @@
 #include "proc.h"
 #include "list.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 
@@ -24,10 +25,20 @@
 #define SCHEDULER_TYPE1 1
 #define SCHEDULER_TYPE2 2
 
+#define TYPES_OF_IRQS 6
 
 // CONSTANTES E TIPOS {{{1
 // intervalo entre interrupções do relógio
 #define INTERVALO_INTERRUPCAO 50   // em instruções executadas
+
+struct sys_metrics_t 
+{
+  int total_processes;
+  int total_runtime;
+  int total_halted_time;
+  int *interrupts;
+  int preemptions;
+};
 
 struct so_t {
   cpu_t *cpu;
@@ -45,6 +56,9 @@ struct so_t {
   list *queue;
   int quantum;
 
+  sys_metrics_t metrics;
+  int latest_clock;
+
   // t1: tabela de processos, processo corrente, pendências, etc
 };
 
@@ -59,6 +73,18 @@ static int so_carrega_programa(so_t *self, char *nome_do_executavel);
 static bool copia_str_da_mem(int tam, char str[tam], mem_t *mem, int ender);
 
 // CRIAÇÃO {{{1
+
+sys_metrics_t so_inicializa_metricas(so_t *self)
+{
+  sys_metrics_t metrics;
+  metrics.total_processes = 0;
+  metrics.total_runtime = 0;
+  metrics.total_halted_time = 0;
+  metrics.interrupts = (int *)malloc(TYPES_OF_IRQS * sizeof(int));
+  metrics.preemptions = 0;
+
+  return metrics;
+}
 
 so_t *so_cria(cpu_t *cpu, mem_t *mem, es_t *es, console_t *console)
 {
@@ -78,6 +104,8 @@ so_t *so_cria(cpu_t *cpu, mem_t *mem, es_t *es, console_t *console)
 
   self->queue = list_create();  
   self->quantum = DEFAULT_QUANTUM;
+
+  self->metrics = so_inicializa_metricas(self);
 
   // quando a CPU executar uma instrução CHAMAC, deve chamar a função
   //   so_trata_interrupcao, com primeiro argumento um ptr para o SO
@@ -113,6 +141,51 @@ void so_destroi(so_t *self)
 }
 
 
+void so_update_metrics(so_t *self, int irq)
+{
+  // métrica de tipo de interrupção
+  self->metrics.interrupts[irq]++;
+
+
+  // métricas de tempo
+  int last_clock = self->latest_clock;
+  if(es_le(self->es, D_RELOGIO_INSTRUCOES, &self->latest_clock) != ERR_OK)
+  {
+    console_printf("Erro na leitura do relógio");
+    exit(-1);
+  }
+
+  int elapsed_time = self->latest_clock - last_clock;
+
+  for (int i = 1; i < self->process_counter; i++)
+  {
+    process_t *proc = self->process_table[i];
+    if(proc != NULL)
+    {
+      proc_metrics_t *metrics = proc_get_metrics_ptr(proc);
+      switch (proc_get_state(proc))
+      {
+        case PROC_EXECUTANDO:
+          metrics->executing_time += elapsed_time;
+          break;
+
+        case PROC_PRONTO:
+          metrics->ready_time += elapsed_time;
+          break;
+
+        case PROC_BLOQUEADO:
+          metrics->blocked_time += elapsed_time;
+          break;
+        
+        default:
+          break;
+      }
+    }
+  }
+}
+
+
+
 // TRATAMENTO DE INTERRUPÇÃO {{{1
 
 // funções auxiliares para o tratamento de interrupção
@@ -121,6 +194,8 @@ static void so_trata_irq(so_t *self, int irq);
 static void so_trata_pendencias(so_t *self);
 static void so_escalona(so_t *self);
 static int so_despacha(so_t *self);
+int so_suicide(so_t *self);
+bool is_any_proc_alive(so_t *self);
 
 
 // função a ser chamada pela CPU quando executa a instrução CHAMAC, no tratador de
@@ -141,8 +216,13 @@ static int so_trata_interrupcao(void *argC, int reg_A)
 {
   so_t *self = argC;
   irq_t irq = reg_A;
+
+  // atualiza as métricas do SO
+  so_update_metrics(self, irq);
+
   // esse print polui bastante, recomendo tirar quando estiver com mais confiança
-  console_printf("SO: recebi IRQ %d (%s)", irq, irq_nome(irq));
+  // console_printf("SO: recebi IRQ %d (%s)", irq, irq_nome(irq));
+
   // salva o estado da cpu no descritor do processo que foi interrompido
   so_salva_estado_da_cpu(self);
   // faz o atendimento da interrupção
@@ -151,8 +231,18 @@ static int so_trata_interrupcao(void *argC, int reg_A)
   so_trata_pendencias(self);
   // escolhe o próximo processo a executar
   so_escalona(self);
-  // recupera o estado do processo escolhido
-  return so_despacha(self);
+
+  if (!is_any_proc_alive(self))
+  {
+    return so_suicide(self);
+  }
+
+  else
+  {
+    // recupera o estado do processo escolhido
+    return so_despacha(self);
+  }
+
 }
 
 static void so_salva_estado_da_cpu(so_t *self)
@@ -182,7 +272,7 @@ int device_calc(int device, int type);
 
 static void so_bloqueia_proc(so_t *self, process_t* proc, int block_type, int block_info)
 {
-  console_printf("BLOQUEEI UM PROCESSO, SUA ID ERA %d com causa %d", proc_get_ID(proc), block_type);
+  console_printf("SO: bloqueei um processo, sua id era %d com causa %d", proc_get_ID(proc), block_type);
   proc_set_state(proc, PROC_BLOQUEADO);
   proc_set_block_type(proc, block_type);
   proc_set_block_info(proc, block_info);
@@ -198,7 +288,7 @@ static void so_bloqueia_proc(so_t *self, process_t* proc, int block_type, int bl
 
 static void so_desbloqueia_proc(so_t *self, process_t* proc)
 {
-  console_printf("DESBLOQUEEI UM PROCESSO, SUA ID ERA %d", proc_get_ID(proc));
+  console_printf("SO: desbloqueei um processo, sua id era %d", proc_get_ID(proc));
   proc_set_state(proc, PROC_PRONTO);
   proc_set_block_type(proc, AGUARDA_NADA);
   proc_set_block_info(proc, NULL_ID);
@@ -251,7 +341,6 @@ static void so_trata_pendencia_escrita(so_t *self, process_t* proc)
 
 
   int dado = proc_get_X(proc);
-  console_printf("Imprimi %c", dado);
   if (es_escreve(self->es, device_calc(base_device, TELA), dado) != ERR_OK) {
     console_printf("SO: problema no acesso à tela");
     self->erro_interno = true;
@@ -326,7 +415,6 @@ static void scheduler_dumb_type0(so_t *self)
       if (analyzed != NULL && proc_get_state(analyzed) == PROC_PRONTO)
       {
         self->current_process = analyzed;
-        proc_set_state(analyzed, PROC_EXECUTANDO);
         return;
       }
       
@@ -341,8 +429,11 @@ static void round_robin_type1(so_t *self)
   {
     void *timed_out;
 
-    self->queue = list_pop(self->queue, &timed_out);
+    self->queue = list_pop(self->queue, &(timed_out));
     self->queue = list_append(self->queue, timed_out);
+
+    if (timed_out	!= NULL)
+      proc_increment_preemption(timed_out);
   }
 
   process_t *chosen_process = list_get(self->queue, 0);
@@ -370,6 +461,7 @@ static void round_robin_type2(so_t *self)
     if (self->current_process != NULL)
     {
       proc_calc_priority(self->current_process, self->quantum, DEFAULT_QUANTUM);
+      proc_increment_preemption(self->current_process);
     }
   }
 
@@ -379,7 +471,7 @@ static void round_robin_type2(so_t *self)
   for (int i = 1; i < self->process_counter; i++)
   {
     process_t *analyzed = self->process_table[i];
-    if (analyzed != NULL && proc_get_state(analyzed) == PROC_PRONTO)
+    if (analyzed != NULL && (proc_get_state(analyzed) == PROC_PRONTO || proc_get_state(analyzed) == PROC_EXECUTANDO))
     {
       double cur_priority = proc_get_priority(analyzed);
       if (cur_priority > max_priority)
@@ -390,7 +482,6 @@ static void round_robin_type2(so_t *self)
     }
   }
 
-
   if (self->current_process == chosen_process)
   {
     self->quantum--;
@@ -399,8 +490,57 @@ static void round_robin_type2(so_t *self)
   self->current_process = chosen_process; 
 }
 
+int so_suicide(so_t *self)
+{
+
+
+  err_t e1, e2;
+  e1 = es_escreve(self->es, D_RELOGIO_INTERRUPCAO, 0);
+  e2 = es_escreve(self->es, D_RELOGIO_TIMER, 0);
+  if (e1 != ERR_OK || e2 != ERR_OK) {
+    console_printf("SO: não consigo parar VOU DOMINAR O MUNDO EXECUÇÃO ETERNA");
+    self->erro_interno = true;
+  }
+
+  console_printf("--------------------------------------------------");
+  console_printf("--------------------------------------------------");
+  console_printf("--------------------------------------------------");
+  console_printf("------                                      ------");
+  console_printf("------                                      ------");
+  console_printf("------     SO: todos os processos mortos    ------");
+  console_printf("------        SO: parando a simulação       ------");
+  console_printf("------                                      ------");
+  console_printf("------       Clique 'F' para continuar.     ------");
+  console_printf("------                                      ------");
+  console_printf("------                                      ------");
+  console_printf("--------------------------------------------------");
+  console_printf("--------------------------------------------------");
+  console_printf("---------------------------------:)-;)-:D---------");
+
+  return 1;
+}
+
+bool is_any_proc_alive(so_t *self)
+{
+  for (int i = 1; i < self->process_counter; i++)
+  {
+    process_t *analyzed = self->process_table[i];
+    if (analyzed != NULL)
+    {
+      if (proc_get_state(analyzed) != PROC_MORTO)
+      {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 static void so_escalona(so_t *self)
 {
+  process_t *irq_causer = self->current_process;
+
   switch (SCHEDULER_TYPE)
   {
     case SCHEDULER_TYPE0:
@@ -414,6 +554,15 @@ static void so_escalona(so_t *self)
     case SCHEDULER_TYPE2:
       round_robin_type2(self);
       break;
+  }
+ 
+  if (irq_causer != self->current_process)
+  {
+    proc_set_state(self->current_process, PROC_EXECUTANDO);
+    if (irq_causer != NULL && proc_get_state(irq_causer) == PROC_EXECUTANDO)
+    {
+      proc_set_state(irq_causer, PROC_PRONTO);   
+    }  
   }
   
 }
@@ -505,6 +654,7 @@ static void so_trata_irq_reset(so_t *self)
 
   process_t *process = so_novo_proc(self, "init.maq");
   self->current_process = process;
+  proc_set_state(process, PROC_EXECUTANDO);
 
   // coloca o programa init na memória
   if (proc_get_PC(process) != 100) {
@@ -553,7 +703,6 @@ static void so_trata_irq_relogio(so_t *self)
   // t1: deveria tratar a interrupção
   //   por exemplo, decrementa o quantum do processo corrente, quando se tem
   //   um escalonador com quantum
-  console_printf("SO: interrupção do relógio (não tratada)");
 }
 
 // foi gerada uma interrupção para a qual o SO não está preparado
@@ -815,5 +964,97 @@ static bool copia_str_da_mem(int tam, char str[tam], mem_t *mem, int ender)
   // estourou o tamanho de str
   return false;
 }
+
+
+/* -------------------------------------------- */
+/* --- cálculo e impressão de métricas aqui --- */
+/* -------------------------------------------- */
+
+void so_tally(so_t *self)
+{
+  // finaliza as contagens das métricas de execução da simulação
+  self->metrics.total_processes = self->process_counter-1;
+
+  for (int i = 1; i < self->process_counter; i++)
+  {
+    process_t *proc = self->process_table[i];
+    proc_metrics_t *proc_metrics = proc_get_metrics_ptr(proc);
+
+    self->metrics.total_runtime += proc_metrics->executing_time;
+    self->metrics.total_halted_time += proc_metrics->blocked_time;
+    self->metrics.preemptions += proc_metrics->preemptions;
+
+    proc_internal_tally(proc);
+  }
+}
+
+void so_show_metrics(so_t *self)
+{
+  so_tally(self);
+
+  console_printf("##################################################");
+  console_printf("#####     Métricas do Sistema Operacional    #####");
+  console_printf("##################################################");
+
+  console_printf("\n");
+  console_printf("##########        Métricas Gerais       ##########");
+  console_printf("-> Número de processos criados: %d processos", self->metrics.total_processes);
+  console_printf("-> Tempo de execução:           %d instruções", self->metrics.total_runtime);
+  console_printf("-> Tempo total de ócio:         %d instruções", self->metrics.total_halted_time);
+  console_printf("\n");
+  console_printf("##########         Interrupções         ##########");
+  console_printf("-> Tipo IRQ_RESET:   %d interrupções", self->metrics.interrupts[IRQ_RESET]);
+  console_printf("-> Tipo IRQ_ERR_CPU: %d interrupções", self->metrics.interrupts[IRQ_ERR_CPU]);
+  console_printf("-> Tipo IRQ_SISTEMA: %d interrupções", self->metrics.interrupts[IRQ_SISTEMA]);
+  console_printf("-> Tipo IRQ_RELOGIO: %d interrupções", self->metrics.interrupts[IRQ_RELOGIO]);
+  console_printf("-> Tipo IRQ_TECLADO: %d interrupções", self->metrics.interrupts[IRQ_TECLADO]);
+  console_printf("-> Tipo IRQ_TELA:    %d interrupções", self->metrics.interrupts[IRQ_TELA]);
+  
+  console_printf("\n");
+  console_printf("##########           Processos          ##########");
+  for (int i = 1; i < self->process_counter; i++)
+  {
+    process_t *proc = self->process_table[i];
+    proc_metrics_t *proc_metrics = proc_get_metrics_ptr(proc);
+    console_printf("--------------------  ID: #%02d  --------------------", proc_get_ID(proc));
+    console_printf("-> Tempo de retorno:        %d instruções", proc_metrics->existence_time);
+    console_printf("-> Número de preempções:    %d preempções", proc_metrics->preemptions);
+    console_printf("-> Tempo médio de resposta: %.2f instruções", proc_metrics->avg_response_time);
+  
+
+    console_printf("-> Entrada em estados:");
+    console_printf("----------------------------------------");
+    console_printf("|   pronto   | bloqueado  | executando |");
+    console_printf("| %10d | %10d | %10d |", proc_metrics->ready_count, proc_metrics->blocked_count, proc_metrics->executing_count);
+    console_printf("----------------------------------------");
+
+    console_printf("-> Tempo em estados:");
+    console_printf("----------------------------------------");
+    console_printf("|   pronto   | bloqueado  | executando |");
+    console_printf("| %10d | %10d | %10d |", proc_metrics->ready_time, proc_metrics->blocked_time, proc_metrics->executing_time);
+    console_printf("----------------------------------------");
+    
+
+    proc_internal_tally(proc);
+  }
+
+    console_printf("--------------------------------------------------");
+    console_printf("--------------------------------------------------");
+    console_printf("--------------------------------------------------");
+    console_printf("------                                      ------");
+    console_printf("------                                      ------");
+    console_printf("------         Veja o relatório no          ------");
+    console_printf("------       arquivo ./log_da_console       ------");
+    console_printf("------                                      ------");
+    console_printf("------    Ele estará no final do arquivo.   ------");
+    console_printf("------                                      ------");
+    console_printf("------                                      ------");
+    console_printf("--------------------------------------------------");
+    console_printf("--------------------------------------------------");
+    console_printf("---------------------------------by-brizzi--------");
+
+}
+
+
 
 // vim: foldmethod=marker
