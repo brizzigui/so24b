@@ -19,7 +19,7 @@
 #define MAX_PROC 16
 #define DEFAULT_QUANTUM 10
 
-#define SCHEDULER_TYPE 0 // escolha o tipo de escalonador
+#define SCHEDULER_TYPE 2 // escolha o tipo de escalonador
 
 #define SCHEDULER_TYPE0 0
 #define SCHEDULER_TYPE1 1
@@ -29,7 +29,7 @@
 
 // CONSTANTES E TIPOS {{{1
 // intervalo entre interrupções do relógio
-#define INTERVALO_INTERRUPCAO 50   // em instruções executadas
+#define INTERVALO_INTERRUPCAO 100   // em instruções executadas
 
 struct sys_metrics_t 
 {
