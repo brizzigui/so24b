@@ -35,7 +35,7 @@ process_t *proc_create(int id, int PC)
     process->id = id;
     process->PC = PC;
     process->exec_state = PROC_PRONTO;
-    process->device = (id%4)*4;
+    process->device = ((id-1)%4)*4;
 
     process->block_type = AGUARDA_NADA;
     process->block_info = NULL_ID;

@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <math.h>
 
 #define MAX_PROC 16
 #define DEFAULT_QUANTUM 10
@@ -465,7 +466,7 @@ static void round_robin_type2(so_t *self)
     }
   }
 
-  float max_priority = 0.0;
+  float min_priority = INFINITY;
   process_t *chosen_process = NULL;
 
   for (int i = 1; i < self->process_counter; i++)
@@ -474,9 +475,9 @@ static void round_robin_type2(so_t *self)
     if (analyzed != NULL && (proc_get_state(analyzed) == PROC_PRONTO || proc_get_state(analyzed) == PROC_EXECUTANDO))
     {
       double cur_priority = proc_get_priority(analyzed);
-      if (cur_priority > max_priority)
+      if (cur_priority < min_priority)
       {
-        max_priority = cur_priority;
+        min_priority = cur_priority;
         chosen_process = analyzed;
       }
     }
