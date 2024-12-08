@@ -1,0 +1,276 @@
+Os comentários foram feitos lendo o código. Parte é comentário para eu entender
+a organização do código, parte é o que eu achei que talvez não funcione ok.
+Ainda não olhei os relatórios.
+
+jaime
+  com.h com.c
+    registro de terminal
+  esc.h esc.c
+    escalonador
+  proc.h proc.c
+    processo
+  tabela.h tabela.c
+    formatação de métricas
+  so.c
+    trata_interrupcao
+      n_irq[irq]++
+      so_sincroniza (calcula delta_t e atualiza métricas)
+      if (tem_trabalho) despacha else desliga
+    trata_pendencias
+      para cada proc bloqueado
+        trata_bloqueio (desbloqueia se for o caso)
+    escalona
+      se não deve escalonar, retorna
+      se tem proc corrente, recalcula prio
+      se tem proc corrente e estado é exec, insere na fila
+      escolhe o próximo processo
+      so_executa_proc (proc_para, altera métricas, proc_exec, remove da fila,
+        altera proc_corrente, inicializa quantum)
+    trata_irq_relogio
+      i_proc_restante--
+    chamada_le
+      if !com_le_porta bloqueia_proc
+  problemas
+    tá confundindo pid com posição na tabela
+    só tá salvando PC, X, A; o resto é necessário pro t2
+
+diego
+  bloqueio.h - define bloqueio_motivo_id
+  estado.h - define estado_processo_id
+  processo.h - define porta_t, processo_t, estado_processo_id (de novo), 
+    bloqueio_id (== bloqueio_motivo_id), struct proc_metricas
+  so.c
+    define várias globais (pq não colocar em so_t?)
+    trata_interrupcao - chama so_sincroniza (calcula delta_t e soma em todos proc)
+    trata_pendencias
+      para cada processo bloqueado: switch no motivo
+    so_precisa_escalonar
+      atualiza a prioridade do processo corrente se ele está bloqueado
+      verifica se acabou o quantum, e se for o caso:
+        muda estado para pronto, atualiza prio
+    tenta_ler
+      não entendi porque desbloqueia o processo se chamada_sistema != 1
+    coloca_processo_fila
+      tem esta pérola: if (a == 5) b = 5; else b = a;
+    so_escalona
+      se não precisa escalonar, retorna
+      recria fila de processos
+      escolhe o de maior prio
+      inicializa quantum, se mudou o processo
+  geral
+    se vai criar a cada vez, pq manter uma fila?
+    se a fila é recriada a cada vez, perde a ordem, que é o objetivo duma fila
+    só tem um escalonador
+    a inexistência de processo corrente no despacha é situação normal (não 'deu ruim')
+    grep -n malloc so.c
+      153:  so_t *self = malloc(sizeof(*self));
+      922:  processo->metricas = (proc_metricas*)malloc(sizeof(proc_metricas));
+    grep -n free so.c
+      209:  free(self);
+    acho que tem um problema na contagem do número de vezes que um processo vai
+      para cada estado. Por exemplo, na primeira configuração do relatório o P0
+      foi 61 vezes para o estado executando, 3 para bloqueado e 21 para pronto.
+      Cada vez que o processo vai para um estado, deve sair desse estado para ir
+      para outro. Se ele foi 61 vezes para executando, em cada uma dessas 61
+      vezes deve ter ido para um dos outros estados, então tá faltando vezes nos
+      outros estados.
+
+brizzi
+  dispositivos.h - constantes para facilitar id dos terminais
+  list.h,c - lista encadeada
+  proc.h,c - processo, métricas
+  so.c
+    so_trata_pendencia_espera - a espera é por pid, pid não pode ser sinônimo de
+      posição na tabela (a não ser que awaiting_proc seja posição, traduzido do
+      pid por quem inicializou isso)
+    round_robin_type1 tem isso:
+      self->queue = list_append(self->queue, timed_out);
+      if (timed_out != NULL)
+      pode inserir NULL na fila?
+    round_robin_type2 - quanto menor o número, maior a prio
+    so_mata_proc - pid != índice na tabela
+  geral
+    a prioridade dos processos tá sempre diminuindo, acho que tem um problema no
+      cálculo (tá em float?)
+
+jhuan
+  con_pt.h,c - porta de terminal
+  esc.h,c - escalonador, lista de processos
+  process.h,c - processo
+  geral
+    no início, tá executando só o p1, mas deve ter o p2 ou o init pronto com prio
+      maior
+
+luis gustavo
+  so.c - tudo
+    atualiza_prioridade - a + b / 2   !=   (a + b) / 2
+    eu juntaria ha_processos_em_estado com busca_primeiro_processo_pronto
+
+mathias
+  dispositivos.h - constantes para facilitar id dos terminais
+  so.c - todo o resto
+    o pid do processo não deve ser equivalente à posição na tabela
+    trata_le: desbloqueia o processo, mas não faz a leitura
+    calcula_prioridade - a + b / 2   !=   (a + b) / 2
+    so_chamada_le: coloca o valor lido do teclado em um local que será sobrescrito
+      quando executar despacha
+    em alguns locais está acessando diretamente os valores em IRQ_END_*
+
+leandro
+  so.h,c tudo
+    já que definiu um tipo para estado_processo_t, poderia declarar estado do processo
+      com esse tipo, né?
+    so_escalona_*: tratar pendências não é tarefa do escalonador! Aliás, não entendi
+      por que tá sendo feito muito do que tá sendo feito no escalonador...
+    so_recupera_estado_da_cpu: pq? se fosse uma aux do despacha para recuperar o estado
+      da cpu, faria mais sentido
+    tá acessando IRQ_END_* fora da rotina de salvar ou recuperar estado da CPU
+
+guilherme einloft
+  escalonador.h,c - escalonadores
+  processo.h,c - processo
+  so.c
+    não entendi por que chama esc_remove_processo(0) em so_mata_processo
+    se a tua função so_trata_bloq_entrada fosse só um pouquinho diferente, dava pra
+      usar ela na chamada de leitura:
+        if (!f(p)) bloqueia(p, ENTRADA)
+      e no teste de desbloqueio:
+        if (f(p)) desbloqueia(p)
+
+gabriel
+  bloqueio.h - defines de tipos de bloqueio
+  cpu - função para cópia da cpu (?)
+  so.h - definição de vários tipos
+  so.c
+    logs controlados por flags
+    a cada escalonamento, refaz a fila de processos (perdendo a ordem da fila).
+      perde um pouco o sentido de ter uma fila!
+    na interrupção de relógio, tá decrementando o quantum do primeiro processo não
+      morto! o processo corrente é quem tava executando, é ele que consumiu CPU.
+    no fim de so_chamada_le, tem um "if (processo->estado == bloqueado)". Em que
+      situação o processo poderia estar bloqueado nesse ponto?
+    na escrita que não bloqueia, o reg A do processo é colocado em 0 para que ele
+      saiba que deu certo, mas quando bloqueia, o reg A não é alterado.
+    na chamada para esperar um processo, se o processo esperado não existir ou já
+      estiver morto (ou for o próprio processo), não deve bloquear.
+
+jonathan+eduardo
+  ptable.h,c - tabela de processos
+    check_waiting - ??
+    pid não pode ser índice em um vetor
+  ulist.h,c - lista de espera pela morte de processos
+  so.c
+    o escalona tá chamando priority_mode e standard_mode. é pra ser assim mesmo?
+    load_registers só deveria ser executado pela despacha()
+    faço minha tua pergunta
+        // Por quê?
+        process_set_state(found, ready);
+  geral
+    a prioridade deveria ser entre 0 e 1 (é sempre a média entre a prio anterior
+      que está entre 0 e 1 e t_exec/quantum, em que t_exec está entre 0 e quantum).
+
+lucas
+  dispositivos.h - constantes para facilitar id dos terminais
+  processo.h,c - processo (get, set), métricas
+  so.c
+    verifica_leitura - só tá vendo se dá para ler, mas não tá lendo!
+    verifica_morte - e se so_busca_processo retornar NULL?
+    tá acessando IRQ_END_* fora das rotinar para salvar e recuperar o estado da cpu
+    cria_proc não tá retornando -1 em A para o processo quando criação falha
+    so_chamada_mata_proc vai chamar set_a do processo NULL:
+      if (corrente != NULL) ...;
+      else set_a(corrente, -1);
+
+joao
+  so.c - tudo
+    quando desbloqueia da leitura, não lê
+    tem acesso solto a IRQ_END_*
+  geral
+    a prioridade não deveria ficar maior que 1 (o t_exec é sempre entre 0 e quantum)
+    merecia ter umas funçõezinhas auxiliares para reduzir a poluição
+
+murilo
+  escalonador.h,c - vazios
+  processo.h,c - processo (get, set)
+  so.c
+  geral
+    coloquei esse print no so_despacha:
+      console_printf("desp %d prio %.3f, qt=%d", proc->pid, proc->prioridade, self->quantum);
+      o quantum fica negativo, a prioridade fica enorme (devia ser entre 0 e 1)
+      não está escalonando o processo com maior prioridade (menor número)
+
+lorenzo
+  controlador.h,c - controle de terminais
+  escalonador.h,c - escalonador e fila de processos
+    achei estranho que o escalonador escolhe o primeiro processo no estado "EXEC_PROC"
+  processo.h,c - processo (pouco mais que get, set)
+  tabela.h,c - formatador para métricas
+  so.c
+
+luis antunes
+  proc.h,c - processo (get, set)
+  so.c
+    tem funções de debug!
+    a + b / (c / 2) != (a + b / c) / 2
+    trata_pendencia_leitura - desbloqueia o processo, mas não faz a leitura
+    não pode atualizar a prioridade a cada interrupção. a prioridade é calculada
+      à partir da parcela do quantum que o processo usou, o que só é conhecido
+      quando ele para de executar.
+
+luana
+  controle_portas.h,c - controle dos terminais
+  escalonador.h,c - escalonadores
+  processo.h,c - processo (get, set)
+  so.c
+
+geralzão
+  vários tão calculando o tempo em um estado atualizando todos os processos cada
+    vez que o SO executa. Não se necessita de tempos parciais, então dá para
+    atualizar cada processo só quando ele muda de estado, com algo assim:
+      proc_muda_estado(processo p, novo_estado, agora):
+        t_no_estado_atual = agora - p..desde_quando_tou_nesse_estado
+        p..t_acum_no_estado[estado_atual] += t_no_estado_atual
+        p..estado_atual = novo_estado
+        p..desde_quanto_tou_nesse_estado = agora
+  uma forma simples de implementar a fila de processos é colocar um ponteiro prox
+    na própria estrutura do processo. Um processo não pode estar mais de uma vez
+    na fila, nem em mais de uma fila ao mesmo tempo. Pode inclusive fazer uma fila
+    de bloqueados com o mesmo campo, para não ter que procurar entre todos os processos
+    quais estão bloqueados.
+  enquanto um processo está na fila de prontos, sua prioridade não é alterada. Dá
+    para manter a fila de prontos ordenada por prioridade, só mudando a inserção, para
+    inserir na posição correspondente à prioridade. Com isso, o escalonamento circular
+    e por prioridades ficam iguais (exceto pela forma de inserção e pelo cálculo da
+    prioridade quando o processo perde o processador).
+  é comum ter excesso de código nas funções de mais alto nível, e repetição de código
+    em várias dessas funções. Por exemplo, tem isso em um so_chamada_le:
+      self->processo_corrente->estado = BLOQUEADO;
+      self->processo_corrente->razao = LEITURA;
+      self->processo_corrente->metricas.n_estados[self->processo_corrente->estado]++;
+      calcula_prioridade(self, self->processo_corrente);
+      remove_fila(self, self->processo_corrente->process_id);
+    e algo bem parecido em so_chamada_escr etc. Essa forma de programar tem vários
+      problemas; entre eles:
+      tem que escrever mais código
+      tem decisões que se forem alteradas (ou inseridas) mais tarde vão ocasionar
+        mudanças espalhadas por todo o código
+      quando se está escrevendo essa função, tem que ter vários conceitos sendo pensados
+        ao mesmo tempo (o que precisa para bloquear, o que vai ser necessário quando
+	desbloquear, que métricas têm que ser calculadas nessa hora, se agora tem ou
+	não que se preocupar com a prioridade do processo, se tem que mexer em alguma
+	fila, etc).
+      quando se tiver mexendo em métricas (por exemplo), tem que pensar e achar os
+        locais do código onde se fez algo com as métricas, e pensar se falta ou sobra
+	algum
+    é mais fácil quando se está escrevendo isso pensar "mmm, aqui tenho que bloquear o
+      processo", e colocar algo como:
+        bloqueia_processo_corrente(self, LEITURA);
+      e depois, quando for implementar essa função, pensa melhor nas necessidades dela,
+        e se precisa enviar mais argumentos, ou se não foi uma boa ideia, etc
+  vários fizeram a tabela de processos com alocação dinâmica. É bom pra treinar, mas
+    podia ser um vetor...
+  tem alguns trabalhos em que parece que a leitura de dados não funciona. Que tal
+    converter e rodar um dos programas exemplo que tem leitura do teclado?
+
+Mais geralzão ainda, mas a culpa é do prof
+  Me passei na forma de calcular o tempo médio de resposta. Tempo de resposta é o tempo entre o processo ser desbloqueado e ele ser executado. É o tempo em que ele fica no estado pronto depois de desbloquear. Tempo médio de resposta é a média desses tempos. Seria a divisão entre o tempo total no estado pronto pelo número de vezes que esteve no estado pronto se o único motivo de ir para o estado pronto fosse quando é desbloqueado. Não precisa alterar os trabalhos, mas precisa saber que tempo médio de resposta não é o que está sendo calculado.
