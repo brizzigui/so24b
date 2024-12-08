@@ -18,7 +18,6 @@
 #include <math.h>
 
 #define MAX_PROC 16
-#define DEFAULT_QUANTUM 10
 
 #define SCHEDULER_TYPE 2 // escolha o tipo de escalonador
 
@@ -28,8 +27,8 @@
 
 #define TYPES_OF_IRQS 6
 
-// CONSTANTES E TIPOS {{{1
-// intervalo entre interrupções do relógio
+// CONSTANTES DE EXECUÇÃO
+#define DEFAULT_QUANTUM 10
 #define INTERVALO_INTERRUPCAO 100   // em instruções executadas
 
 struct sys_metrics_t 
@@ -471,7 +470,7 @@ static void round_robin_type2(so_t *self)
 
   for (int i = 1; i < self->process_counter; i++)
   {
-    process_t *analyzed = self->process_table[i];
+    process_t *analyzed = self->process_table[i];   
     if (analyzed != NULL && (proc_get_state(analyzed) == PROC_PRONTO || proc_get_state(analyzed) == PROC_EXECUTANDO))
     {
       double cur_priority = proc_get_priority(analyzed);

@@ -179,7 +179,7 @@ void proc_set_priority(process_t *proc, int priority)
 
 void proc_calc_priority(process_t *proc, int remaining_time, int default_time)
 {
-    proc->priority = (proc->priority + (default_time-remaining_time)/default_time)/2;
+    proc->priority = (proc->priority + (double)(default_time-remaining_time)/(double)default_time)/2;
 }
 
 void proc_increment_preemption(process_t *proc)
