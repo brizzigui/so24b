@@ -5,6 +5,7 @@
 #include "programa.h"
 #include "instrucao.h"
 #include "proc.h"
+#include "tabpag.h"
 
 #include <stdlib.h>
 #include <stdbool.h>
@@ -16,7 +17,9 @@ struct process_t
 
     int A;
     int X;
+    int complemento;
     int PC;
+    int erro;
 
     int device;
 
@@ -26,14 +29,15 @@ struct process_t
     double priority;
 
     proc_metrics_t metrics;
+
+    tabpag_t* page_table;
 };
 
 
-process_t *proc_create(int id, int PC)
+process_t *proc_create(int id)
 {
     process_t *process = malloc(sizeof(process_t));
     process->id = id;
-    process->PC = PC;
     process->exec_state = PROC_PRONTO;
     process->device = ((id-1)%4)*4;
 
@@ -56,6 +60,7 @@ process_t *proc_create(int id, int PC)
     process->metrics.executing_time = 0;
     /* -------- metrics end here -------- */
 
+    process->page_table = tabpag_cria();
 
     return process;
 }
@@ -78,6 +83,16 @@ int proc_get_A(process_t* proc)
 int proc_get_X(process_t* proc)
 {
     return proc->X;
+}
+
+int proc_get_complemento(process_t *proc)
+{
+    return proc->complemento;
+}
+
+int proc_get_erro(process_t* proc)
+{
+    return proc->erro;
 }
 
 exec_state_t proc_get_state(process_t *proc)
@@ -110,6 +125,11 @@ proc_metrics_t *proc_get_metrics_ptr(process_t *proc)
     return &proc->metrics;
 }
 
+tabpag_t *proc_get_tab_pag(process_t* proc)
+{
+    return proc->page_table;
+}
+
 /*---------------------------------------------------------------*/
 
 void proc_set_ID(process_t *proc, int id)
@@ -130,6 +150,16 @@ void proc_set_A(process_t *proc, int a)
 void proc_set_X(process_t *proc, int x)
 {
     proc->X = x;
+}
+
+void proc_set_complemento(process_t *proc, int complemento)
+{
+    proc->complemento = complemento;
+}
+
+void proc_set_erro(process_t *proc, int erro)
+{
+    proc->erro = erro;
 }
 
 void proc_set_state(process_t *proc, exec_state_t state)

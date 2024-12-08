@@ -34,7 +34,7 @@ struct proc_metrics_t
 #define AGUARDA_SAIDA 2
 #define AGUARDA_PROC 3
 
-process_t *proc_create(int id, int PC);
+process_t *proc_create(int id);
 
 int proc_get_PC(process_t* proc);
 int proc_get_A(process_t* proc);
@@ -46,6 +46,9 @@ int proc_get_block_type(process_t *proc);
 int proc_get_block_info(process_t *proc);
 double proc_get_priority(process_t *proc);
 proc_metrics_t *proc_get_metrics_ptr(process_t *proc);
+int proc_get_complemento(process_t *proc);
+int proc_get_erro(process_t* proc);
+tabpag_t *proc_get_tab_pag(process_t* proc);
 
 
 void proc_set_ID(process_t *proc, int id);
@@ -57,6 +60,9 @@ void proc_set_device(process_t *proc, int device);
 void proc_set_block_type(process_t *proc, int block_type);
 void proc_set_block_info(process_t *proc, int block_info);
 void proc_set_priority(process_t *proc, int priority);
+void proc_set_complemento(process_t *proc, int complemento);
+void proc_set_erro(process_t *proc, int erro);
+
 
 void proc_calc_priority(process_t *proc, int remaining_time, int default_time);
 void proc_increment_preemption(process_t *proc);

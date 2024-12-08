@@ -7,6 +7,7 @@
 #define SO_H
 
 typedef struct so_t so_t;
+typedef struct sys_metrics_t sys_metrics_t;
 
 #include "memoria.h"
 #include "mmu.h"
