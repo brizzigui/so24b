@@ -12,6 +12,7 @@
 #include "instrucao.h"
 #include "proc.h"
 #include "list.h"
+#include "mem_block.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -82,16 +83,11 @@ struct so_t {
   sys_metrics_t metrics;
   int latest_clock;
 
-  // t1: tabela de processos, processo corrente, pendências, etc
+  mem_t *disk;
+  int disk_pointer; // próximo valor livre de escrita no disco
 
-  // primeiro quadro da memória que está livre (quadros anteriores estão ocupados)
-  // t2: com memória virtual, o controle de memória livre e ocupada é mais
-  //     completo que isso
-  int quadro_livre;
-  // uma tabela de páginas para poder usar a MMU
-  // t2: com processos, não tem esta tabela global, tem que ter uma para
-  //     cada processo
-  tabpag_t *tabpag_global;
+  mem_block_t *mem_tracker;
+  int num_physical_pages;
 };
 
 
@@ -131,10 +127,15 @@ so_t *so_cria(cpu_t *cpu, mem_t *mem, mmu_t *mmu,
 
   self->cpu = cpu;
   self->mem = mem;
+  self->disk = mem_cria(10000);
   self->mmu = mmu;
   self->es = es;
   self->console = console;
   self->erro_interno = false;
+
+  self->disk_pointer = 0;
+  self->num_physical_pages = mem_tam(self->mem)/TAM_PAGINA;
+  self->mem_tracker = create_mem_blocks(self->num_physical_pages);
 
   self->process_slots = MAX_PROC;
   self->process_table = malloc(self->process_slots * sizeof(process_t *));
@@ -170,16 +171,6 @@ so_t *so_cria(cpu_t *cpu, mem_t *mem, mmu_t *mmu,
     self->erro_interno = true;
   }
 
-  // inicializa a tabela de páginas global, e entrega ela para a MMU
-  // t2: com processos, essa tabela não existiria, teria uma por processo, que
-  //     deve ser colocada na MMU quando o processo é despachado para execução
-  self->tabpag_global = tabpag_cria();
-  mmu_define_tabpag(self->mmu, self->tabpag_global);
-  // define o primeiro quadro livre de memória como o seguinte àquele que
-  //   contém o endereço 99 (as 100 primeiras posições de memória (pelo menos)
-  //   não vão ser usadas por programas de usuário)
-  // t2: o controle de memória livre deve ser mais aprimorado que isso  
-  self->quadro_livre = 99 / TAM_PAGINA + 1;
   return self;
 }
 
@@ -632,12 +623,14 @@ static int so_despacha(so_t *self)
   pc = proc_get_PC(self->current_process);
   complemento = proc_get_complemento(self->current_process);
   erro = proc_get_erro(self->current_process);
+  tabpag_t *tab_pag = proc_get_tab_pag(self->current_process);
 
   mem_escreve(self->mem, IRQ_END_A, a);
   mem_escreve(self->mem, IRQ_END_X, x);
   mem_escreve(self->mem, IRQ_END_PC, pc);
   mem_escreve(self->mem, IRQ_END_complemento, complemento);
   mem_escreve(self->mem, IRQ_END_erro, erro);
+  mmu_define_tabpag(self->mmu, tab_pag);
 
   return 0;
 }
@@ -717,10 +710,86 @@ static void so_trata_irq_reset(so_t *self)
   mem_escreve(self->mem, IRQ_END_modo, usuario);
 }
 
+static bool is_any_block_free(so_t *self)
+{
+  for (size_t i = 0; i < self->num_physical_pages; i++)
+  {
+    if (!self->mem_tracker[i].used)
+    {
+      return true;
+    }
+    
+  }
+
+  return false;
+}
+
+static int find_free_page(so_t *self)
+{
+  for (size_t i = 0; i < self->num_physical_pages; i++)
+  {
+    if (!self->mem_tracker[i].used)
+    {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+static void so_trata_page_fault_espaco_encontrado(so_t *self, int end_causador)
+{
+    int free_page = find_free_page(self);
+    
+    int end_disk_ini = proc_get_disk_address(self->current_process);
+    int end_disk = end_disk_ini;
+
+    int end_virt_ini = end_causador;
+    int end_virt_fim = end_virt_ini + TAM_PAGINA - 1;
+
+    for (int end_virt = end_virt_ini; end_virt <= end_virt_fim; end_virt++) {
+      int dado;
+      if (mem_le(self->disk, end_disk, &dado) != ERR_OK) {
+        console_printf("Erro na leitura no tratamento de page fault");
+        return;
+      }
+
+      int physical_target_address = free_page*TAM_PAGINA + (end_virt - end_virt_ini);
+
+      if (mem_escreve(self->mem, physical_target_address, dado) != ERR_OK) {
+        console_printf("Erro na escrita no tratamento de page fault");
+        return;
+      }
+
+      end_disk++;
+    }
+
+    self->mem_tracker[free_page].used = true;
+    self->mem_tracker[free_page].user = proc_get_ID(self->current_process);
+
+    tabpag_t *tabela = proc_get_tab_pag(self->current_process);
+    tabpag_define_quadro(tabela, end_causador/10, free_page);
+
+    console_printf("SO: falta de página tratada - havia quadro livre");
+}
+
 static void so_trata_page_fault(so_t *self)
 {
-  console_printf("SO: falha de página não tratada");
-  self->erro_interno = true;
+  int end_causador = proc_get_complemento(self->current_process);
+  console_printf("SO: endereço causador do page fault = %d", end_causador);
+
+  bool has_free_block = is_any_block_free(self);
+  if(has_free_block)
+  {
+    so_trata_page_fault_espaco_encontrado(self, end_causador);
+  }
+
+  else
+  {
+    console_printf("SO: memória principal cheia");
+    console_printf("SO: remoção de página para swap não implementada");
+    self->erro_interno = true;
+  }
 }
 
 // interrupção gerada quando a CPU identifica um erro
@@ -947,6 +1016,11 @@ static void so_chamada_mata_proc(so_t *self)
     proc_set_state(self->process_table[read_x], PROC_MORTO);
   }
   
+  // destroi a tabela de páginas do processo
+  // mas nao libera a memória física
+  tabpag_t *page_table = proc_get_tab_pag(self->current_process);
+  free(page_table);
+
   self->current_process = NULL;
 
   void *v;
@@ -997,6 +1071,15 @@ static int so_carrega_programa(so_t *self, process_t *processo,
   return end_carga;
 }
 
+static void so_marca_uso_memoria(so_t *self, int end_ini, int end_fim, int proc_id)
+{
+  for (int address = 0; address < end_fim; address += TAM_PAGINA)
+  {
+    self->mem_tracker[address/TAM_PAGINA].used = true;
+    self->mem_tracker[address/TAM_PAGINA].user = proc_id;
+  }
+}
+
 static int so_carrega_programa_na_memoria_fisica(so_t *self, programa_t *programa)
 {
   int end_ini = prog_end_carga(programa);
@@ -1008,6 +1091,12 @@ static int so_carrega_programa_na_memoria_fisica(so_t *self, programa_t *program
       return -1;
     }
   }
+
+  so_marca_uso_memoria(self, end_ini, end_fim, 0); 
+  // 0 nesse contexto indica que é um processo nulo
+  // o que condiz com o carregamento do trata_int.maq
+  // que pré-data os processos
+
   console_printf("carregado na memória física, %d-%d", end_ini, end_fim);
   return end_ini;
 }
@@ -1016,6 +1105,9 @@ static int so_carrega_programa_na_memoria_virtual(so_t *self,
                                                   programa_t *programa,
                                                   process_t *processo)
 {
+  // meu: carregará programa na memória secundária
+
+
   // t2: isto tá furado...
   // está simplesmente lendo para o próximo quadro que nunca foi ocupado,
   //   nem testa se tem memória disponível
@@ -1025,32 +1117,25 @@ static int so_carrega_programa_na_memoria_virtual(so_t *self,
   //   colocadas na memória principal por demanda. Para simplificar ainda mais, a
   //   memória secundária pode ser alocada da forma como a principal está sendo
   //   alocada aqui (sem reuso)
-  int end_virt_ini = prog_end_carga(programa);
-  int end_virt_fim = end_virt_ini + prog_tamanho(programa) - 1;
-  int pagina_ini = end_virt_ini / TAM_PAGINA;
-  int pagina_fim = end_virt_fim / TAM_PAGINA;
-  int quadro_ini = self->quadro_livre;
-  // mapeia as páginas nos quadros
-  int quadro = quadro_ini;
-  for (int pagina = pagina_ini; pagina <= pagina_fim; pagina++) {
-    //tabpag_define_quadro(self->tabpag_global, pagina, quadro);
-    quadro++;
-  }
-  self->quadro_livre = quadro;
+  
+  // carrega o programa na memória secundária
+  int end_disk_ini = self->disk_pointer;
+  int end_disk = end_disk_ini;
 
-  // carrega o programa na memória principal
-  int end_fis_ini = quadro_ini * TAM_PAGINA;
-  int end_fis = end_fis_ini;
+  int end_virt_ini = 0;
+  int end_virt_fim = end_virt_ini + prog_tamanho(programa) - 1;
+
   for (int end_virt = end_virt_ini; end_virt <= end_virt_fim; end_virt++) {
-    if (mem_escreve(self->mem, end_fis, prog_dado(programa, end_virt)) != ERR_OK) {
+    if (mem_escreve(self->disk, end_disk, prog_dado(programa, end_virt)) != ERR_OK) {
       console_printf("Erro na carga da memória, end virt %d fís %d\n", end_virt,
-                     end_fis);
+                     end_disk);
       return -1;
     }
-    end_fis++;
+    end_disk++;
   }
-  console_printf("carregado na memória virtual V%d-%d F%d-%d",
-                 end_virt_ini, end_virt_fim, end_fis_ini, end_fis - 1);
+  console_printf("carregado na memória secundária V%d-%d DISK%d-%d",
+                 end_virt_ini, end_virt_fim, end_disk_ini, end_disk - 1);
+
   return end_virt_ini;
 }
 

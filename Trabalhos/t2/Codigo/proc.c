@@ -31,6 +31,8 @@ struct process_t
     proc_metrics_t metrics;
 
     tabpag_t* page_table;
+
+    int disk_address;
 };
 
 
@@ -130,6 +132,11 @@ tabpag_t *proc_get_tab_pag(process_t* proc)
     return proc->page_table;
 }
 
+int proc_get_disk_address(process_t *proc)
+{
+    return proc->disk_address;
+}
+
 /*---------------------------------------------------------------*/
 
 void proc_set_ID(process_t *proc, int id)
@@ -200,6 +207,11 @@ void proc_set_block_type(process_t *proc, int block_type)
 void proc_set_block_info(process_t *proc, int block_info)
 {
     proc->block_info = block_info;
+}
+
+void proc_set_disk_address(process_t *proc, int disk_address)
+{
+    proc->disk_address = disk_address;
 }
 
 void proc_set_priority(process_t *proc, int priority)
