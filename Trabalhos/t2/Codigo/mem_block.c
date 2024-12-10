@@ -16,15 +16,16 @@ mem_block_t *create_mem_blocks(int tamanho)
     mem_block_t *blocks = malloc(sizeof(mem_block_t) * tamanho);
     for (size_t i = 0; i < tamanho; i++)
     {
-        if (i < 10)
+        // dois primeiros blocos são espaço reservado
+        if (i < 2)
         {
             blocks[i].used = true;
+            blocks[i].user = 0;
         }
         
         else
         {
             blocks[i].used = false;
-            blocks[i].user = 0;
         }
     }
 

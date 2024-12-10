@@ -22,17 +22,24 @@
 
 #define MAX_PROC 16
 
-#define SCHEDULER_TYPE 2 // escolha o tipo de escalonador
+#define SCHEDULER_TYPE 2    // escolha o tipo de escalonador
 
 #define SCHEDULER_TYPE0 0
 #define SCHEDULER_TYPE1 1
 #define SCHEDULER_TYPE2 2
 
-#define TYPES_OF_IRQS 6
+#define SWAP_ALGORITHM 2    // escolha o tipo de escalonador
+
+#define EXTRADUMB_REMOVAL 0
+#define FIFO 1
+#define SECOND_CHANCE 2
 
 // CONSTANTES DE EXECUÇÃO
 #define DEFAULT_QUANTUM 10
 #define INTERVALO_INTERRUPCAO 100   // em instruções executadas
+
+#define TYPES_OF_IRQS 6
+
 
 struct sys_metrics_t 
 {
@@ -327,7 +334,7 @@ static void so_bloqueia_proc(so_t *self, process_t* proc, int block_type, int bl
 
   void *v;
   self->queue = list_pop(self->queue, &v);
-
+  
   if (self->current_process != NULL)
   {
     proc_calc_priority(self->current_process, self->quantum, DEFAULT_QUANTUM);
@@ -611,13 +618,12 @@ static void so_escalona(so_t *self)
     {
       proc_set_state(irq_causer, PROC_PRONTO);   
     }  
-  }
 
-  if (self->current_process != NULL)
-  {
-    console_printf("Escalonei o processo #%d", proc_get_ID(self->current_process));
-  }
-  
+    if (self->current_process != NULL)
+    {
+      console_printf("SO: Escalonei o processo #%d", proc_get_ID(self->current_process));
+    }
+  } 
   
 }
 
@@ -775,9 +781,197 @@ static void so_trata_page_fault_espaco_encontrado(so_t *self, int end_causador)
 
     self->mem_tracker[free_page].used = true;
     self->mem_tracker[free_page].user = proc_get_ID(self->current_process);
+    self->mem_tracker[free_page].page = end_causador/TAM_PAGINA;
+    self->mem_tracker[free_page].chance = false;
+
+    if(es_le(self->es, D_RELOGIO_INSTRUCOES, &self->mem_tracker[free_page].cicles) != ERR_OK)
+    {
+      console_printf("Erro crítico de atualização da memória");
+    }
 
     tabpag_t *tabela = proc_get_tab_pag(self->current_process);
     tabpag_define_quadro(tabela, end_causador/TAM_PAGINA, free_page);
+}
+
+
+// isso só foi usado nas fases mais iniciais de desenvolvimento
+// e não deve ser usado em detrimento dos outros algoritmos
+int dumb = 1;
+static int extradumb_removal()
+{
+  dumb = (dumb + 1)%8 + 2;
+  return dumb;
+}
+
+static int fifo(so_t *self)
+{
+  int max_cycles = -1;
+  int purged_block = -1;
+  int cur_cicles;
+
+  if(es_le(self->es, D_RELOGIO_INSTRUCOES, &cur_cicles) != ERR_OK)
+  {
+    console_printf("Erro crítico de atualização da memória");
+    return 2;
+  }
+
+  // começa em 2 pois os dois primeiros blocos são espaço reservado
+  for (int i = 2; i < self->num_physical_pages; i++)
+  {
+    int this_cicles = cur_cicles - self->mem_tracker[i].cicles;
+    if (this_cicles > max_cycles)
+    {
+      max_cycles = this_cicles;
+      purged_block = i;
+    }
+  }
+
+  return purged_block;
+}
+
+static int second_chance(so_t *self)
+{
+  int max_cycles = -1;
+  int purged_block = -1;
+  int cur_cicles;
+
+  if(es_le(self->es, D_RELOGIO_INSTRUCOES, &cur_cicles) != ERR_OK)
+  {
+    console_printf("Erro crítico de atualização da memória");
+    return 2;
+  }
+
+  // começa em 2 pois os dois primeiros blocos são espaço reservado
+
+  // loop para os sem segunda chance
+  for (int i = 2; i < self->num_physical_pages; i++)
+  {   
+    tabpag_t *proc_tabpag = proc_get_tab_pag(self->process_table[self->mem_tracker[i].user]);
+    if (tabpag_bit_acesso(proc_tabpag, self->mem_tracker[i].page) == 0)
+    {
+      int this_cicles = cur_cicles - self->mem_tracker[i].cicles;
+      if (this_cicles > max_cycles)
+      {
+        max_cycles = this_cicles;
+        purged_block = i;
+      }
+    }
+  }
+
+  if (purged_block == -1)
+  {
+    for (int i = 2; i < self->num_physical_pages; i++)
+    {   
+      tabpag_t *proc_tabpag = proc_get_tab_pag(self->process_table[self->mem_tracker[i].user]);
+      if (tabpag_bit_acesso(proc_tabpag, self->mem_tracker[i].page) == 1)
+      {
+        tabpag_zera_bit_acesso(proc_tabpag, self->mem_tracker[i].page);
+        int this_cicles = cur_cicles - self->mem_tracker[i].cicles;
+        if (this_cicles > max_cycles)
+        {
+          max_cycles = this_cicles;
+          purged_block = i;
+        }
+      }
+    }
+  }
+  
+  return purged_block;
+}
+
+static int choose_purged_mem_block(so_t *self)
+{
+  // retorna o índice do quadro a ser removido
+  switch (SWAP_ALGORITHM)
+  {
+    case EXTRADUMB_REMOVAL:
+      return extradumb_removal();
+    
+    case FIFO:
+      return fifo(self);
+
+    case SECOND_CHANCE:
+      return second_chance(self);
+  }
+
+}
+
+static void so_swap_pagina(so_t *self, int end_causador)
+{
+  int to_remove_mem_block = choose_purged_mem_block(self);
+  process_t *outgoing_process = self->process_table[self->mem_tracker[to_remove_mem_block].user];
+  process_t *incoming_process = self->current_process;
+
+  if (outgoing_process != NULL)
+  {
+    // trata possível alteração e necessidade de writeback na memória secundária
+    tabpag_t *outgoing_page_table = proc_get_tab_pag(outgoing_process);
+    int outgoing_page = self->mem_tracker[to_remove_mem_block].page;
+
+    // encontra onde escrever de volta
+    int disk_write_address = proc_get_disk_address(outgoing_process) + (outgoing_page * TAM_PAGINA);
+
+
+    // escreve de volta se foi alterada
+    if (tabpag_bit_alteracao(outgoing_page_table, outgoing_page))
+    {
+      for (int i = 0; i < TAM_PAGINA; i++)
+      {
+        int v;
+        if (mem_le(self->mem, to_remove_mem_block*TAM_PAGINA + i, &v) != ERR_OK)
+        {
+          console_printf("Erro na leitura no tratamento de page fault");
+          return;
+        }
+        
+        if (mem_escreve(self->disk, disk_write_address + i, v) != ERR_OK) 
+        {
+          console_printf("Erro na escrita no tratamento de page fault");
+          return;
+        }
+      }
+    }
+
+    console_printf("SO: Removeu o conteúdo do bloco %d usado pela página %d do processo #%d", to_remove_mem_block, outgoing_page, proc_get_ID(outgoing_process));
+
+    // invalida página na tabela do processo de saída
+    tabpag_invalida_pagina(outgoing_page_table, self->mem_tracker[to_remove_mem_block].page);
+  }
+  
+
+  int end_disk_ini = proc_get_disk_address(incoming_process) + end_causador - end_causador%TAM_PAGINA;
+
+  // lê a página
+  for (int i = 0; i < TAM_PAGINA; i++)
+  {
+    int v;
+    if (mem_le(self->disk, end_disk_ini + i, &v) != ERR_OK)
+    {
+      console_printf("Erro na leitura no tratamento de page fault");
+      return;
+    }
+    
+    if (mem_escreve(self->mem, to_remove_mem_block*TAM_PAGINA + i, v) != ERR_OK) 
+    {
+      console_printf("Erro na escrita no tratamento de page fault");
+      return;
+    }
+  }
+
+  self->mem_tracker[to_remove_mem_block].used = true;
+  self->mem_tracker[to_remove_mem_block].user = proc_get_ID(incoming_process);
+  self->mem_tracker[to_remove_mem_block].page = end_causador/TAM_PAGINA;
+  self->mem_tracker[to_remove_mem_block].chance = false;
+
+  if(es_le(self->es, D_RELOGIO_INSTRUCOES, &self->mem_tracker[to_remove_mem_block].cicles) != ERR_OK)
+  {
+    console_printf("Erro crítico de atualização da memória");
+  }
+
+  tabpag_t *incoming_page_table = proc_get_tab_pag(incoming_process);
+  tabpag_define_quadro(incoming_page_table, end_causador/TAM_PAGINA, to_remove_mem_block);
+
+  console_printf("SO: Inseriu no bloco %d a página %d do processo #%d", to_remove_mem_block, end_causador/TAM_PAGINA, proc_get_ID(incoming_process));
 }
 
 static void so_trata_page_fault(so_t *self)
@@ -787,14 +981,14 @@ static void so_trata_page_fault(so_t *self)
   bool has_free_block = is_any_block_free(self);
   if(has_free_block)
   {
+    console_printf("SO: tratando falha de página com bloco livre");
     so_trata_page_fault_espaco_encontrado(self, end_causador);
   }
 
   else
   {
-    console_printf("SO: memória principal cheia");
-    console_printf("SO: remoção de página para swap não implementada");
-    self->erro_interno = true;
+    console_printf("SO: tratando falha de página sem bloco livre");
+    so_swap_pagina(self, end_causador);
   }
 }
 
@@ -812,7 +1006,6 @@ static void so_trata_irq_err_cpu(so_t *self)
   err_t err = proc_get_erro(self->current_process);
   if(err == ERR_PAG_AUSENTE)
   {
-    console_printf("SO: tratando falha de página");
     so_trata_page_fault(self);
     return;
   }
