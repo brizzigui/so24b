@@ -35,6 +35,7 @@ struct proc_metrics_t
 #define AGUARDA_ENTRADA 1
 #define AGUARDA_SAIDA 2
 #define AGUARDA_PROC 3
+#define AGUARDA_DISCO 4
 
 process_t *proc_create(int id);
 

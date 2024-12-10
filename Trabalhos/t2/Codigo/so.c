@@ -37,6 +37,7 @@
 // CONSTANTES DE EXECUÇÃO
 #define DEFAULT_QUANTUM 10
 #define INTERVALO_INTERRUPCAO 100   // em instruções executadas
+#define TEMPO_BLOQUEIO_DISCO 1
 
 #define TYPES_OF_IRQS 6
 
@@ -428,6 +429,18 @@ static void so_trata_pendencia_espera(so_t *self, process_t* proc)
   }
 }
 
+static void so_trata_pendencia_disco(so_t *self, process_t* proc)
+{
+  if(proc_get_block_info(proc) == 0)
+  {
+    so_desbloqueia_proc(self, proc);
+    return;
+  }
+
+  proc_set_block_info(proc, proc_get_block_info(proc)-1);
+}
+
+
 static void so_trata_pendencias(so_t *self)
 {
   // t1: realiza ações que não são diretamente ligadas com a interrupção que
@@ -455,6 +468,10 @@ static void so_trata_pendencias(so_t *self)
 
         case AGUARDA_PROC:
           so_trata_pendencia_espera(self, analyzed);
+          break;
+
+        case AGUARDA_DISCO:
+          so_trata_pendencia_disco(self, analyzed);
           break;
         
         default:
@@ -1000,6 +1017,8 @@ static void so_trata_page_fault(so_t *self)
     console_printf("SO: tratando falha de página sem bloco livre");
     so_swap_pagina(self, end_causador);
   }
+
+  so_bloqueia_proc(self, self->current_process, AGUARDA_DISCO, TEMPO_BLOQUEIO_DISCO);
 }
 
 // interrupção gerada quando a CPU identifica um erro
