@@ -186,7 +186,6 @@ void so_update_metrics(so_t *self, int irq)
   // métrica de tipo de interrupção
   self->metrics.interrupts[irq]++;
 
-
   // métricas de tempo
   int last_clock = self->latest_clock;
   if(es_le(self->es, D_RELOGIO_INSTRUCOES, &self->latest_clock) != ERR_OK)
@@ -257,31 +256,23 @@ static int so_trata_interrupcao(void *argC, int reg_A)
   so_t *self = argC;
   irq_t irq = reg_A;
 
-  console_printf("A");
   // atualiza as métricas do SO
   so_update_metrics(self, irq);
-  console_printf("B");
 
   // esse print polui bastante, recomendo tirar quando estiver com mais confiança
-  // console_printf("SO: recebi IRQ %d (%s)", irq, irq_nome(irq));
+  //console_printf("SO: recebi IRQ %d (%s)", irq, irq_nome(irq));
 
   // salva o estado da cpu no descritor do processo que foi interrompido
-  console_printf("C");
-
   so_salva_estado_da_cpu(self);
+
   // faz o atendimento da interrupção
-
-  console_printf("D");
   so_trata_irq(self, irq);
+
   // faz o processamento independente da interrupção
-  console_printf("E");
-
   so_trata_pendencias(self);
-  // escolhe o próximo processo a executar
-  console_printf("F");
 
+  // escolhe o próximo processo a executar
   so_escalona(self);
-  console_printf("G");
 
 
   if (!is_any_proc_alive(self))
@@ -292,7 +283,7 @@ static int so_trata_interrupcao(void *argC, int reg_A)
   else
   {
     // recupera o estado do processo escolhido
-    console_printf("H");
+    //console_printf("H");
 
     return so_despacha(self);
   }
@@ -544,7 +535,7 @@ static void round_robin_type2(so_t *self)
     self->quantum--;
   }
   
-  self->current_process = chosen_process; 
+  self->current_process = chosen_process;  
 }
 
 int so_suicide(so_t *self)
@@ -621,6 +612,12 @@ static void so_escalona(so_t *self)
       proc_set_state(irq_causer, PROC_PRONTO);   
     }  
   }
+
+  if (self->current_process != NULL)
+  {
+    console_printf("Escalonei o processo #%d", proc_get_ID(self->current_process));
+  }
+  
   
 }
 
@@ -644,12 +641,6 @@ static int so_despacha(so_t *self)
   mem_escreve(self->mem, IRQ_END_complemento, complemento);
   mem_escreve(self->mem, IRQ_END_erro, ERR_OK);
   mmu_define_tabpag(self->mmu, tab_pag);
-
-  int q;
-  int err = tabpag_traduz(tab_pag, pc/TAM_PAGINA, &q);
-  console_printf("Espero ler instrução do quadro físico %d, traduzido da página virtual %d", q, pc/TAM_PAGINA);
-  console_printf("Erro foi: %d. ERR_OK é %d", err, ERR_OK);
-  console_printf("Processo = #%d", proc_get_ID(self->current_process));
 
   return 0;
 }
@@ -762,7 +753,6 @@ static void so_trata_page_fault_espaco_encontrado(so_t *self, int end_causador)
     
     int end_disk_ini = proc_get_disk_address(self->current_process) + end_causador - end_causador%TAM_PAGINA;
     int end_disk = end_disk_ini;
-    console_printf("SO: end disk = %d", end_disk);
 
     int end_virt_ini = end_causador;
     int end_virt_fim = end_virt_ini + TAM_PAGINA - 1;
@@ -780,8 +770,6 @@ static void so_trata_page_fault_espaco_encontrado(so_t *self, int end_causador)
         console_printf("Erro na escrita no tratamento de page fault");
         return;
       }
-
-      //console_printf("SO: escrevi em end. %d aka página %d - virtual %d", physical_target_address, physical_target_address/TAM_PAGINA, end_causador/TAM_PAGINA);
       end_disk++;
     }
 
@@ -790,14 +778,11 @@ static void so_trata_page_fault_espaco_encontrado(so_t *self, int end_causador)
 
     tabpag_t *tabela = proc_get_tab_pag(self->current_process);
     tabpag_define_quadro(tabela, end_causador/TAM_PAGINA, free_page);
-
-    console_printf("SO: falta de página tratada - havia quadro livre");
 }
 
 static void so_trata_page_fault(so_t *self)
 {
   int end_causador = proc_get_complemento(self->current_process);
-  console_printf("SO: endereço causador do page fault = %d", end_causador);
 
   bool has_free_block = is_any_block_free(self);
   if(has_free_block)
@@ -1009,18 +994,16 @@ static void so_chamada_cria_proc(so_t *self)
 
   if (so_copia_str_do_processo(self, 100, nome, ender_proc, self->current_process)) 
   {
+    console_printf("SO: carreguei %s", nome);
     process_t *process = so_novo_proc(self, nome);
-
-    int ender_carga = proc_get_PC(process);
-    if (ender_carga > 0) {
-      // t1: deveria escrever no PC do descritor do processo criado
-      proc_set_A(self->current_process, proc_get_ID(process));
-      return;
-    }
+    // t1: deveria escrever no PC do descritor do processo criado
+    proc_set_A(self->current_process, proc_get_ID(process));
+    return;
   }
   
   // deveria escrever -1 (se erro) ou o PID do processo criado (se OK) no reg A
   //   do processo que pediu a criação
+  console_printf("SO: algo triste aconteceu comigo.");
   proc_set_A(self->current_process, -1);
 
 }
@@ -1065,6 +1048,7 @@ static void so_chamada_espera_proc(so_t *self)
 {
   // T1: deveria bloquear o processo se for o caso (e desbloquear na morte do esperado)
   // ainda sem suporte a processos, retorna erro -1
+
   int awaits_who = proc_get_X(self->current_process);
   so_bloqueia_proc(self, self->current_process, AGUARDA_PROC, awaits_who);
 }
@@ -1096,6 +1080,7 @@ static int so_carrega_programa(so_t *self, process_t *processo,
   } else {
     end_carga = so_carrega_programa_na_memoria_virtual(self, programa, processo);
     proc_set_disk_address(processo, end_carga);
+    end_carga = 0;
   }
 
   prog_destroi(programa);
@@ -1156,7 +1141,7 @@ static int so_carrega_programa_na_memoria_virtual(so_t *self,
   int end_virt_ini = 0;
   int end_virt_fim = end_virt_ini + prog_tamanho(programa) - 1;
 
-  self->disk_pointer = end_virt_fim + 1;
+  self->disk_pointer = end_disk_ini + end_virt_fim + 1;
 
   for (int end_virt = end_virt_ini; end_virt <= end_virt_fim; end_virt++) {
     if (mem_escreve(self->disk, end_disk, prog_dado(programa, end_virt)) != ERR_OK) {
@@ -1169,7 +1154,7 @@ static int so_carrega_programa_na_memoria_virtual(so_t *self,
   console_printf("carregado na memória secundária V%d-%d DISK%d-%d",
                  end_virt_ini, end_virt_fim, end_disk_ini, end_disk - 1);
 
-  return end_virt_ini;
+  return end_disk_ini;
 }
 
 // ACESSO À MEMÓRIA DOS PROCESSOS {{{1
@@ -1189,7 +1174,8 @@ static bool so_copia_str_do_processo(so_t *self, int tam, char str[tam],
     // não tem memória virtual implementada, posso usar a mmu para traduzir
     //   os endereços e acessar a memória
     if (mmu_le(self->mmu, end_virt + indice_str, &caractere, usuario) != ERR_OK) {
-      return false;
+      // se não está na memória principal, busca na memória secundária (disco)
+      mem_le(self->disk, proc_get_disk_address(self->current_process) + end_virt + indice_str, &caractere);
     }
     if (caractere < 0 || caractere > 255) {
       return false;
