@@ -257,20 +257,32 @@ static int so_trata_interrupcao(void *argC, int reg_A)
   so_t *self = argC;
   irq_t irq = reg_A;
 
+  console_printf("A");
   // atualiza as métricas do SO
   so_update_metrics(self, irq);
+  console_printf("B");
 
   // esse print polui bastante, recomendo tirar quando estiver com mais confiança
   // console_printf("SO: recebi IRQ %d (%s)", irq, irq_nome(irq));
 
   // salva o estado da cpu no descritor do processo que foi interrompido
+  console_printf("C");
+
   so_salva_estado_da_cpu(self);
   // faz o atendimento da interrupção
+
+  console_printf("D");
   so_trata_irq(self, irq);
   // faz o processamento independente da interrupção
+  console_printf("E");
+
   so_trata_pendencias(self);
   // escolhe o próximo processo a executar
+  console_printf("F");
+
   so_escalona(self);
+  console_printf("G");
+
 
   if (!is_any_proc_alive(self))
   {
@@ -280,9 +292,11 @@ static int so_trata_interrupcao(void *argC, int reg_A)
   else
   {
     // recupera o estado do processo escolhido
+    console_printf("H");
+
     return so_despacha(self);
   }
-
+  
 }
 
 static void so_salva_estado_da_cpu(so_t *self)
@@ -617,20 +631,25 @@ static int so_despacha(so_t *self)
   // o valor retornado será o valor de retorno de CHAMAC
   if (self->erro_interno || self->current_process == NULL) return 1;
 
-  int a, x, pc, complemento, erro;
+  int a, x, pc, complemento;
   a = proc_get_A(self->current_process);
   x = proc_get_X(self->current_process);
   pc = proc_get_PC(self->current_process);
   complemento = proc_get_complemento(self->current_process);
-  erro = proc_get_erro(self->current_process);
   tabpag_t *tab_pag = proc_get_tab_pag(self->current_process);
 
   mem_escreve(self->mem, IRQ_END_A, a);
   mem_escreve(self->mem, IRQ_END_X, x);
   mem_escreve(self->mem, IRQ_END_PC, pc);
   mem_escreve(self->mem, IRQ_END_complemento, complemento);
-  mem_escreve(self->mem, IRQ_END_erro, erro);
+  mem_escreve(self->mem, IRQ_END_erro, ERR_OK);
   mmu_define_tabpag(self->mmu, tab_pag);
+
+  int q;
+  int err = tabpag_traduz(tab_pag, pc/TAM_PAGINA, &q);
+  console_printf("Espero ler instrução do quadro físico %d, traduzido da página virtual %d", q, pc/TAM_PAGINA);
+  console_printf("Erro foi: %d. ERR_OK é %d", err, ERR_OK);
+  console_printf("Processo = #%d", proc_get_ID(self->current_process));
 
   return 0;
 }
@@ -741,8 +760,9 @@ static void so_trata_page_fault_espaco_encontrado(so_t *self, int end_causador)
 {
     int free_page = find_free_page(self);
     
-    int end_disk_ini = proc_get_disk_address(self->current_process);
+    int end_disk_ini = proc_get_disk_address(self->current_process) + end_causador - end_causador%TAM_PAGINA;
     int end_disk = end_disk_ini;
+    console_printf("SO: end disk = %d", end_disk);
 
     int end_virt_ini = end_causador;
     int end_virt_fim = end_virt_ini + TAM_PAGINA - 1;
@@ -761,6 +781,7 @@ static void so_trata_page_fault_espaco_encontrado(so_t *self, int end_causador)
         return;
       }
 
+      //console_printf("SO: escrevi em end. %d aka página %d - virtual %d", physical_target_address, physical_target_address/TAM_PAGINA, end_causador/TAM_PAGINA);
       end_disk++;
     }
 
@@ -768,7 +789,7 @@ static void so_trata_page_fault_espaco_encontrado(so_t *self, int end_causador)
     self->mem_tracker[free_page].user = proc_get_ID(self->current_process);
 
     tabpag_t *tabela = proc_get_tab_pag(self->current_process);
-    tabpag_define_quadro(tabela, end_causador/10, free_page);
+    tabpag_define_quadro(tabela, end_causador/TAM_PAGINA, free_page);
 
     console_printf("SO: falta de página tratada - havia quadro livre");
 }
@@ -809,6 +830,15 @@ static void so_trata_irq_err_cpu(so_t *self)
     console_printf("SO: tratando falha de página");
     so_trata_page_fault(self);
     return;
+  }
+
+  if(err == ERR_INSTR_INV)
+  {
+    console_printf("SO: caguei");
+    int v;
+    mmu_le(self->mmu, 0, &v, usuario);
+    console_printf("SO: %d", v);
+
   }
 
   console_printf("SO: IRQ não tratada -- erro na CPU: %s", err_nome(err));
@@ -1065,6 +1095,7 @@ static int so_carrega_programa(so_t *self, process_t *processo,
     end_carga = so_carrega_programa_na_memoria_fisica(self, programa);
   } else {
     end_carga = so_carrega_programa_na_memoria_virtual(self, programa, processo);
+    proc_set_disk_address(processo, end_carga);
   }
 
   prog_destroi(programa);
@@ -1124,6 +1155,8 @@ static int so_carrega_programa_na_memoria_virtual(so_t *self,
 
   int end_virt_ini = 0;
   int end_virt_fim = end_virt_ini + prog_tamanho(programa) - 1;
+
+  self->disk_pointer = end_virt_fim + 1;
 
   for (int end_virt = end_virt_ini; end_virt <= end_virt_fim; end_virt++) {
     if (mem_escreve(self->disk, end_disk, prog_dado(programa, end_virt)) != ERR_OK) {

@@ -7,6 +7,7 @@
 #include "cpu.h"
 #include "err.h"
 #include "instrucao.h"
+#include "console.h"
 
 #include <stdbool.h>
 #include <stdlib.h>

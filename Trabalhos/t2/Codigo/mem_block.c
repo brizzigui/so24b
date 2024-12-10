@@ -16,7 +16,7 @@ mem_block_t *create_mem_blocks(int tamanho)
     mem_block_t *blocks = malloc(sizeof(mem_block_t) * tamanho);
     for (size_t i = 0; i < tamanho; i++)
     {
-        if (i < 1)
+        if (i < 10)
         {
             blocks[i].used = true;
         }

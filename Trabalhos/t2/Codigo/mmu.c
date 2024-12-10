@@ -4,6 +4,7 @@
 // so24b
 
 #include "mmu.h"
+#include "console.h"
 #include <stdlib.h>
 #include <assert.h>
 
@@ -50,6 +51,7 @@ static err_t mmu__traduz(mmu_t *self, int endvirt, int *pendfis)
   if (err == ERR_OK) {
     *pendfis = quadro * TAM_PAGINA + deslocamento;
   }
+
   return err;
 }
 
