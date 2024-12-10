@@ -60,6 +60,9 @@ process_t *proc_create(int id)
     process->metrics.ready_time = 0;
     process->metrics.blocked_time = 0;
     process->metrics.executing_time = 0;
+
+    process->metrics.page_faults = 0;
+
     /* -------- metrics end here -------- */
 
     process->page_table = tabpag_cria();

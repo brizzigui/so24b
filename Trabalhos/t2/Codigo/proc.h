@@ -19,6 +19,8 @@ struct proc_metrics_t
     int executing_time;
 
     double avg_response_time;
+
+    int page_faults;
 };
 
 

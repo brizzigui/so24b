@@ -18,7 +18,7 @@
 #include <stdlib.h>
 
 // constantes
-#define MEM_TAM 100        // tamanho da memória principal
+#define MEM_TAM 10000        // tamanho da memória principal
 
 // estrutura com os componentes do computador simulado
 typedef struct {

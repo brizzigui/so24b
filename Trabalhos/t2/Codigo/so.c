@@ -230,6 +230,19 @@ void so_update_metrics(so_t *self, int irq)
   }
 }
 
+void so_display_pagefaults_count(so_t *self)
+{
+  console_printf("-------------------------");
+  console_printf("----   Page faults   ----");
+  console_printf("-------------------------");
+
+  for (int i = 1; i < self->process_counter; i++)
+  {
+    console_printf("    -> Processo #%02d", i);
+    console_printf("       = %d page faults", proc_get_metrics_ptr(self->process_table[i])->page_faults);
+  }
+}
+
 
 
 // TRATAMENTO DE INTERRUPÇÃO {{{1
@@ -284,14 +297,13 @@ static int so_trata_interrupcao(void *argC, int reg_A)
 
   if (!is_any_proc_alive(self))
   {
+    so_display_pagefaults_count(self);
     return so_suicide(self);
   }
 
   else
   {
     // recupera o estado do processo escolhido
-    //console_printf("H");
-
     return so_despacha(self);
   }
   
@@ -547,8 +559,6 @@ static void round_robin_type2(so_t *self)
 
 int so_suicide(so_t *self)
 {
-
-
   err_t e1, e2;
   e1 = es_escreve(self->es, D_RELOGIO_INTERRUPCAO, 0);
   e2 = es_escreve(self->es, D_RELOGIO_TIMER, 0);
@@ -556,21 +566,20 @@ int so_suicide(so_t *self)
     console_printf("SO: não consigo parar VOU DOMINAR O MUNDO EXECUÇÃO ETERNA");
     self->erro_interno = true;
   }
-
   console_printf("--------------------------------------------------");
   console_printf("--------------------------------------------------");
   console_printf("--------------------------------------------------");
-  console_printf("------                                      ------");
+  console_printf("--------------------------------------------------");
   console_printf("------                                      ------");
   console_printf("------     SO: todos os processos mortos    ------");
   console_printf("------        SO: parando a simulação       ------");
-  console_printf("------                                      ------");
-  console_printf("------       Clique 'F' para continuar.     ------");
-  console_printf("------                                      ------");
+  console_printf("------      Estatística completa na log     ------");
+  console_printf("------              da console.             ------");
   console_printf("------                                      ------");
   console_printf("--------------------------------------------------");
   console_printf("--------------------------------------------------");
-  console_printf("---------------------------------:)-;)-:D---------");
+  console_printf("--------------------------------------------------");
+  console_printf("------------------------------------------:)------");
 
   return 1;
 }
@@ -976,6 +985,7 @@ static void so_swap_pagina(so_t *self, int end_causador)
 
 static void so_trata_page_fault(so_t *self)
 {
+  proc_get_metrics_ptr(self->current_process)->page_faults++;
   int end_causador = proc_get_complemento(self->current_process);
 
   bool has_free_block = is_any_block_free(self);
