@@ -37,7 +37,7 @@
 // CONSTANTES DE EXECUÇÃO
 #define DEFAULT_QUANTUM 10
 #define INTERVALO_INTERRUPCAO 100   // em instruções executadas
-#define TEMPO_BLOQUEIO_DISCO 1
+#define TEMPO_BLOQUEIO_DISCO 2
 
 #define TYPES_OF_IRQS 6
 
@@ -433,6 +433,7 @@ static void so_trata_pendencia_disco(so_t *self, process_t* proc)
 {
   if(proc_get_block_info(proc) == 0)
   {
+    proc_set_block_info(proc, AGUARDA_NADA);
     so_desbloqueia_proc(self, proc);
     return;
   }
@@ -845,8 +846,9 @@ static int fifo(so_t *self)
   for (int i = 2; i < self->num_physical_pages; i++)
   {
     int this_cicles = cur_cicles - self->mem_tracker[i].cicles;
-    if (this_cicles > max_cycles)
-    {
+    process_t *user_process = self->process_table[self->mem_tracker[i].user];
+    if (this_cicles > max_cycles && proc_get_block_type(user_process) != AGUARDA_DISCO)
+    {     
       max_cycles = this_cicles;
       purged_block = i;
     }
@@ -876,7 +878,8 @@ static int second_chance(so_t *self)
     if (tabpag_bit_acesso(proc_tabpag, self->mem_tracker[i].page) == 0)
     {
       int this_cicles = cur_cicles - self->mem_tracker[i].cicles;
-      if (this_cicles > max_cycles)
+      process_t *user_process = self->process_table[self->mem_tracker[i].user];
+      if (this_cicles > max_cycles && proc_get_block_type(user_process) != AGUARDA_DISCO)
       {
         max_cycles = this_cicles;
         purged_block = i;
@@ -893,7 +896,8 @@ static int second_chance(so_t *self)
       {
         tabpag_zera_bit_acesso(proc_tabpag, self->mem_tracker[i].page);
         int this_cicles = cur_cicles - self->mem_tracker[i].cicles;
-        if (this_cicles > max_cycles)
+        process_t *user_process = self->process_table[self->mem_tracker[i].user];
+        if (this_cicles > max_cycles && proc_get_block_info(user_process) != AGUARDA_DISCO)
         {
           max_cycles = this_cicles;
           purged_block = i;
@@ -925,6 +929,13 @@ static int choose_purged_mem_block(so_t *self)
 static void so_swap_pagina(so_t *self, int end_causador)
 {
   int to_remove_mem_block = choose_purged_mem_block(self);
+  if (to_remove_mem_block == -1)
+  {
+    console_printf("SO: Não foi possível realizar swap - mem. cheia e bloqueada");
+    return;
+  }
+  
+
   process_t *outgoing_process = self->process_table[self->mem_tracker[to_remove_mem_block].user];
   process_t *incoming_process = self->current_process;
 
